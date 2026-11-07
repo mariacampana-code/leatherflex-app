@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Conexión de Catálogo a Acomodo y UI Limpia"""
+"""Leather-Flex 3D - Traducido 100% al Español Directo"""
 import os
 import json
 import sqlite3
@@ -24,7 +24,7 @@ st.set_page_config(
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 
-# ------------------------------------------------------------------ CSS Personalizado
+# ------------------------------------------------------------------ CSS Personalizado y Traducción Forzada
 st.markdown("""
 <style>
     .stApp {
@@ -84,6 +84,30 @@ st.markdown("""
         box-shadow: 0 8px 20px rgba(0,0,0,0.05);
     }
 </style>
+
+<script>
+    const traducir = () => {
+        // Traducir cargadores de archivos
+        document.querySelectorAll('button[kind="secondary"]').forEach(btn => {
+            if (btn.innerText.includes("Upload")) {
+                btn.innerText = "Subir archivo";
+            }
+        });
+        // Traducir límites de archivo
+        document.querySelectorAll('section[data-testid="stFileUploaderDropzoneInstructions"] span').forEach(span => {
+            if (span.innerText.includes("200MB per file")) {
+                span.innerText = "Máximo 200MB por archivo";
+            }
+        });
+        // Traducir selectores múltiples
+        document.querySelectorAll('div[data-baseweb="select"] input').forEach(inp => {
+            if (inp.placeholder === "Choose options") {
+                inp.placeholder = "Elegir opciones";
+            }
+        });
+    };
+    setInterval(traducir, 500);
+</script>
 """, unsafe_allow_html=True)
 
 def generar_contenido_dxf(puntos):
