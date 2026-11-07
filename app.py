@@ -105,7 +105,6 @@ def crear_dxf_demo(puntos, nombre_archivo):
         f.write(contenido)
 
 def extraer_puntos_desde_foto(bytes_imagen):
-    """Detecta la silueta del molde de cartón/papel usando OpenCV"""
     arr = np.frombuffer(bytes_imagen, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     h, w, _ = img.shape
@@ -183,7 +182,7 @@ if opcion_menu == "Captura del Cuero":
     st.title("Captura del Cuero")
     st.caption("Registro de evidencia en vivo (cámara/galería) e historial del taller.")
 
-    @st.dialog("➕ Capturar Nueva Piel / Evidencia")
+    @st.dialog("Capturar Nueva Piel / Evidencia")
     def modal_crear_post():
         st.write("### Seleccionar foto o video del cuero:")
         
@@ -212,10 +211,10 @@ if opcion_menu == "Captura del Cuero":
                 conn.close()
 
                 st.session_state["ultima_captura_cuero"] = ruta_archivo_guardado
-                st.success("¡Captura guardada!")
+                st.success("Captura guardada")
                 st.rerun()
 
-    if st.button("➕  Tomar foto / video del cuero", type="primary", use_container_width=True):
+    if st.button("Tomar foto / video del cuero", type="primary", use_container_width=True):
         modal_crear_post()
 
     st.write("---")
@@ -227,7 +226,7 @@ if opcion_menu == "Captura del Cuero":
     conn.close()
 
     if not posts:
-        st.info("No hay capturas registradas. Presiona ➕ para tomar la primera foto.")
+        st.info("No hay capturas registradas. Presiona para tomar la primera foto.")
     else:
         for p in posts:
             post_id, usr, tit, fecha, media = p
@@ -279,7 +278,7 @@ elif opcion_menu == "Acomodo de Moldes":
         foto_conectada = st.session_state.get("ultima_captura_cuero")
         
         if foto_conectada and os.path.exists(foto_conectada):
-            st.success("⚡ Imagen obtenida directamente de 'Captura del Cuero'")
+            st.success("Imagen obtenida directamente de 'Captura del Cuero'")
             st.image(foto_conectada, caption="Piel seleccionada para procesamiento", use_column_width=True)
             if st.button("Desvincular esta foto"):
                 st.session_state["ultima_captura_cuero"] = None
@@ -425,7 +424,7 @@ elif opcion_menu == "Calibración de Escáner":
         ruta_tab = os.path.join(TMP, "tablero_para_imprimir.png")
         if not os.path.exists(ruta_tab):
             calibracion.tablero_para_imprimir(ruta_tab)
-        st.download_button("📥 Descargar Tablero Calibración", open(ruta_tab, "rb"), "tablero_calibracion.png", "image/png")
+        st.download_button("Descargar Tablero Calibración", open(ruta_tab, "rb"), "tablero_calibracion.png", "image/png")
         
         f_tab = st.file_uploader("Subir foto del tablero en mesa", key="tab")
         f_bla = st.file_uploader("Hoja blanca para compensación (opcional)", key="bla")
@@ -450,7 +449,7 @@ elif opcion_menu == "Catálogo de Moldes":
     st.title("Catálogo Digital de Moldes")
     st.caption("Base de datos de patrones vectoriales y digitalizaciones físicas.")
 
-    tab_auto, tab_dxf = st.tabs(["📷 Tomar Foto a Molde Físico (Cartón/Papel)", "📄 Subir Archivo DXF (AutoCAD)"])
+    tab_auto, tab_dxf = st.tabs(["Foto a molde", "archivo DXF"])
     
     with tab_auto:
         st.write("### Digitalización Rápida en Taller")
@@ -458,8 +457,8 @@ elif opcion_menu == "Catálogo de Moldes":
         
         foto_molde = st.file_uploader("Tomar foto al molde de cartón", type=["jpg", "png", "jpeg"], key="foto_m_fisico")
         with st.form("form_foto_molde"):
-            nom_f = st.text_input("Nombre de la Pieza", placeholder="Ej. Capellada M-101")
-            cli_f = st.text_input("Cliente", placeholder="Ej. Taller Central")
+            nom_f = st.text_input("Nombre de la Pieza", value="Bolsillo Frontal Billetera")
+            cli_f = st.text_input("Cliente", value="Personalizado")
             
             if st.form_submit_button("Digitalizar y Guardar en Catálogo", type="primary"):
                 if not foto_molde or not nom_f:
@@ -479,14 +478,14 @@ elif opcion_menu == "Catálogo de Moldes":
                               (nom_f, cli_f or "Interno", dims_calc, datetime.now().strftime("%d/%m/%Y"), ruta_guardada))
                     conn.commit()
                     conn.close()
-                    st.success(f"¡Molde '{nom_f}' digitalizado y guardado con éxito!")
+                    st.success(f"Molde '{nom_f}' digitalizado y guardado con éxito.")
                     st.rerun()
 
     with tab_dxf:
         with st.form("nuevo_molde_dxf"):
-            nombre_m = st.text_input("Nombre de la Pieza")
-            cliente_m = st.text_input("Cliente")
-            dims_m = st.text_input("Dimensiones (mm)", "200 x 150")
+            nombre_m = st.text_input("Nombre de la Pieza", value="Bolsillo Frontal Billetera")
+            cliente_m = st.text_input("Cliente", value="Personalizado")
+            dims_m = st.text_input("Dimensiones (mm)", "110 x 80")
             archivo_dxf = st.file_uploader("Archivo DXF", key="dxf_inv")
             
             if st.form_submit_button("Guardar DXF en Catálogo", type="primary") and archivo_dxf:
@@ -515,7 +514,7 @@ elif opcion_menu == "Catálogo de Moldes":
         cols = st.columns(3)
         for idx, m in enumerate(m_list):
             with cols[idx % 3]:
-                st.markdown(f"#### 📐 {m[0]}")
+                st.markdown(f"#### {m[0]}")
                 st.write(f"Cliente: **{m[1]}**")
                 st.write(f"Dimensiones: **{m[2]}**")
                 
