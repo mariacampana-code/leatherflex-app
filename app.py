@@ -190,7 +190,7 @@ if opcion_menu == "Captura del Cuero":
 
                 col_del, _ = st.columns([1, 3])
                 with col_del:
-                    if st.button(f"🗑️ Eliminar foto", key=f"del_{post_id}"):
+                    if st.button("Eliminar", key=f"del_{post_id}"):
                         # 1. Borrar de la base de datos
                         conn = sqlite3.connect(DB_PATH)
                         c = conn.cursor()
@@ -209,7 +209,7 @@ if opcion_menu == "Captura del Cuero":
                         if st.session_state.get("ultima_captura_cuero") == media:
                             st.session_state["ultima_captura_cuero"] = None
 
-                        st.success("Foto eliminada correctamente.")
+                        st.success("Eliminado correctamente.")
                         st.rerun()
                 st.divider()
 
@@ -227,7 +227,7 @@ elif opcion_menu == "Acomodo de Moldes":
         if foto_conectada and os.path.exists(foto_conectada):
             st.success("⚡ Imagen obtenida directamente de 'Captura del Cuero'")
             st.image(foto_conectada, caption="Piel seleccionada para procesamiento", use_column_width=True)
-            if st.button("❌ Desvincular esta foto"):
+            if st.button("Desvincular esta foto"):
                 st.session_state["ultima_captura_cuero"] = None
                 st.rerun()
         else:
