@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Plataforma Completa con Precarga Autogestionada"""
+"""Leather-Flex 3D - Plataforma Completa con Descarga Robusta de DXF"""
 import os
 import json
 import sqlite3
@@ -86,7 +86,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def crear_dxf_demo(puntos, nombre_archivo):
+def generar_contenido_dxf(puntos):
     dxf_content = [
         "0", "SECTION", "2", "HEADER", "0", "ENDSEC",
         "0", "SECTION", "2", "TABLES", "0", "ENDSEC",
@@ -97,9 +97,12 @@ def crear_dxf_demo(puntos, nombre_archivo):
     for x, y in puntos:
         dxf_content.extend(["0", "VERTEX", "8", "MOLDES", "10", str(x), "20", str(y), "30", "0.0"])
     dxf_content.extend(["0", "SEQEND", "0", "ENDSEC", "0", "EOF"])
-    
+    return "\n".join(dxf_content)
+
+def crear_dxf_demo(puntos, nombre_archivo):
+    contenido = generar_contenido_dxf(puntos)
     with open(nombre_archivo, "w") as f:
-        f.write("\n".join(dxf_content))
+        f.write(contenido)
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -111,7 +114,6 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, titulo TEXT, 
                   descripcion TEXT, tipo_falla TEXT, solucion TEXT, fecha TEXT, media_path TEXT)''')
     
-    # Verificar si está vacío el catálogo y precargar automáticamente
     c.execute("SELECT COUNT(*) FROM moldes")
     count = c.fetchone()[0]
     if count == 0:
@@ -460,8 +462,24 @@ elif opcion_menu == "Catálogo de Moldes":
                 st.markdown(f"#### 📐 {m[0]}")
                 st.write(f"Cliente: **{m[1]}**")
                 st.write(f"Dimensiones: **{m[2]}**")
+                
+                # Manejo seguro de lectura de archivos DXF precargados
+                contenido_dxf = ""
                 if m[4] and os.path.exists(m[4]):
-                    st.download_button("Descargar DXF", open(m[4], "rb"), os.basename(m[4]), key=f"btn_{idx}")
+                    with open(m[4], "r") as f_dxf:
+                        contenido_dxf = f_dxf.read()
+                else:
+                    # Generación al vuelo en memoria si es un registro precargado en la nube
+                    pts_base = [(0,0), (200,0), (180,120), (20,120)]
+                    contenido_dxf = generar_contenido_dxf(pts_base)
+                
+                st.download_button(
+                    "Descargar DXF", 
+                    data=contenido_dxf, 
+                    file_name=f"{m[0].replace(' ', '_')}.dxf", 
+                    mime="application/dxf", 
+                    key=f"btn_{idx}"
+                )
     else:
         st.info("Sin moldes registrados.")
 
