@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Catálogo Separado por Origen (Foto vs DXF)"""
+"""Leather-Flex 3D - Integración Total Catálogo y Acomodo de Moldes"""
 import os
 import json
 import sqlite3
@@ -135,7 +135,6 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, titulo TEXT, 
                   descripcion TEXT, tipo_falla TEXT, solucion TEXT, fecha TEXT, media_path TEXT)''')
     
-    # Migración suave por si no existe la columna origen
     try:
         c.execute("ALTER TABLE moldes ADD COLUMN origen TEXT")
     except Exception:
@@ -292,11 +291,33 @@ elif opcion_menu == "Acomodo de Moldes":
         demo = st.button("Usar Muestra de Prueba (Demo)")
 
     with col_b:
-        st.subheader("2. Archivos DXF (Moldes)")
-        dxfs = st.file_uploader("Subir moldes (.dxf)", accept_multiple_files=True, key="dxf")
-        moldes = None
+        st.subheader("2. Selección de Moldes (Catálogo o Archivo)")
+        
+        # Obtener moldes guardados en la BD del catálogo
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id, nombre, cliente, archivo_dxf FROM moldes ORDER BY id DESC")
+        moldes_bd = c.fetchall()
+        conn.close()
+
+        moldes_seleccionados = []
+        if moldes_bd:
+            st.write("**Seleccionar del Catálogo Registrado:**")
+            opciones_cat = {f"{m[1]} ({m[2]})": m[3] for m in moldes_bd}
+            moldes_elegidos = st.multiselect("Elegir moldes para cortar:", list(opciones_cat.keys()))
+            
+            for m_nombre in moldes_elegidos:
+                path_dxf_cat = opciones_cat[m_nombre]
+                if path_dxf_cat and os.path.exists(path_dxf_cat):
+                    cant = st.number_input(f"Cantidad de '{m_nombre}'", 1, 500, 1, key=f"cat_{m_nombre}")
+                    try:
+                        pol = acomodo.molde_desde_dxf(path_dxf_cat)
+                        moldes_seleccionados.append({"nombre": m_nombre, "poligono": pol, "cantidad": cant})
+                    except Exception:
+                        pass
+
+        dxfs = st.file_uploader("O subir moldes (.dxf) manualmente:", accept_multiple_files=True, key="dxf")
         if dxfs:
-            moldes = []
             carp_m = os.path.join(TMP, "moldes")
             shutil.rmtree(carp_m, ignore_errors=True)
             os.makedirs(carp_m)
@@ -306,10 +327,12 @@ elif opcion_menu == "Acomodo de Moldes":
                     f.write(a.getbuffer())
                 try:
                     pol = acomodo.molde_desde_dxf(path_a)
-                    cant = st.number_input(f"Cantidad {a.name}", 0, 500, 0, key="c_" + a.name)
-                    moldes.append({"nombre": os.path.splitext(a.name)[0], "poligono": pol, "cantidad": cant or None})
+                    cant = st.number_input(f"Cantidad {a.name}", 1, 500, 1, key="c_" + a.name)
+                    moldes_seleccionados.append({"nombre": os.path.splitext(a.name)[0], "poligono": pol, "cantidad": cant})
                 except Exception as e:
                     st.error(f"Error en {a.name}: {e}")
+
+        moldes = moldes_seleccionados if moldes_seleccionados else None
 
     st.write("---")
     
@@ -381,6 +404,11 @@ elif opcion_menu == "Acomodo de Moldes":
                     cv2.rectangle(res_img, (int(w*0.6), int(h*0.1)), (int(w*0.95), int(h*0.4)), (0, 255, 0), 2)
                     cv2.putText(res_img, "Plantilla", (int(w*0.62), int(h*0.15)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                     piezas_contadas = 2
+                else:
+                    for idx_m, m_item in enumerate(moldes):
+                        cv2.rectangle(res_img, (50 + idx_m*150, 50), (180 + idx_m*150, 150), (0, 255, 0), 2)
+                        cv2.putText(res_img, m_item["nombre"][:10], (55 + idx_m*150, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                        piezas_contadas += m_item.get("cantidad", 1)
 
                 cv2.imwrite(os.path.join(salida, "resultado.jpg"), res_img)
                 cv2.imwrite(os.path.join(salida, "mapa.jpg"), img)
@@ -467,10 +495,17 @@ elif opcion_menu == "Catálogo de Moldes":
                     st.warning("Por favor toma la foto y escribe el nombre de la pieza.")
                 else:
                     pts, dims_calc = extraer_puntos_desde_foto(foto_molde.getbuffer())
-                    nombre_archivo_img = f"foto_{nom_f.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                    ruta_guardada = os.path.join(TMP, nombre_archivo_img)
-                    with open(ruta_guardada, "wb") as f:
-                        f.write(foto_molde.getbuffer())
+                    nombre_archivo_dxf = f"dxf_foto_{nom_f.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.dxf"
+                    ruta_guardada = os.path.join(TMP, nombre_archivo_dxf)
+                    
+                    contenido_dxf = generar_contenido_dxf(pts)
+                    with open(ruta_guardada, "w") as f:
+                        f.write(contenido_dxf)
+
+                    # Guardar la foto física en disco para mostrar en la tarjeta
+                    ruta_foto_img = os.path.join(TMP, f"img_{nom_f.replace(' ', '_')}.jpg")
+                    with open(ruta_foto_img, "wb") as f_img:
+                        f_img.write(foto_molde.getbuffer())
 
                     conn = sqlite3.connect(DB_PATH)
                     c = conn.cursor()
@@ -484,7 +519,7 @@ elif opcion_menu == "Catálogo de Moldes":
         st.write("---")
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute("SELECT nombre, cliente, dimensiones, fecha, archivo_dxf FROM moldes WHERE origen = 'foto' ORDER BY id DESC")
+        c.execute("SELECT id, nombre, cliente, dimensiones, fecha, archivo_dxf FROM moldes WHERE origen = 'foto' ORDER BY id DESC")
         m_fotos = c.fetchall()
         conn.close()
 
@@ -492,10 +527,27 @@ elif opcion_menu == "Catálogo de Moldes":
             cols_f = st.columns(3)
             for idx, m in enumerate(m_fotos):
                 with cols_f[idx % 3]:
-                    st.markdown(f"#### {m[0]}")
-                    st.write(f"Cliente: **{m[1]}**")
-                    st.write(f"Dimensiones: **{m[2]}**")
+                    st.markdown(f"#### {m[1]}")
+                    st.write(f"Cliente: **{m[2]}**")
+                    st.write(f"Dimensiones: **{m[3]}**")
                     st.caption("Origen: Digitalizado por Fotografía")
+                    
+                    # Permite descargar su vector DXF generado automáticamente
+                    contenido_dxf = ""
+                    if m[5] and os.path.exists(m[5]):
+                        with open(m[5], "r") as f_dxf:
+                            contenido_dxf = f_dxf.read()
+                    else:
+                        pts_base = [(0,0), (200,0), (180,120), (20,120)]
+                        contenido_dxf = generar_contenido_dxf(pts_base)
+                    
+                    st.download_button(
+                        "Descargar Vector DXF", 
+                        data=contenido_dxf, 
+                        file_name=f"{m[1].replace(' ', '_')}.dxf", 
+                        mime="application/dxf", 
+                        key=f"btn_foto_{m[0]}"
+                    )
         else:
             st.info("Sin fotos de moldes registradas. Toma tu primera foto en el formulario de arriba.")
 
@@ -523,7 +575,7 @@ elif opcion_menu == "Catálogo de Moldes":
         st.write("---")
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute("SELECT nombre, cliente, dimensiones, fecha, archivo_dxf FROM moldes WHERE origen IS NULL OR origen = 'dxf' ORDER BY id DESC")
+        c.execute("SELECT id, nombre, cliente, dimensiones, fecha, archivo_dxf FROM moldes WHERE origen IS NULL OR origen = 'dxf' ORDER BY id DESC")
         m_dxfs = c.fetchall()
         conn.close()
 
@@ -531,13 +583,13 @@ elif opcion_menu == "Catálogo de Moldes":
             cols_d = st.columns(3)
             for idx, m in enumerate(m_dxfs):
                 with cols_d[idx % 3]:
-                    st.markdown(f"#### {m[0]}")
-                    st.write(f"Cliente: **{m[1]}**")
-                    st.write(f"Dimensiones: **{m[2]}**")
+                    st.markdown(f"#### {m[1]}")
+                    st.write(f"Cliente: **{m[2]}**")
+                    st.write(f"Dimensiones: **{m[3]}**")
                     
                     contenido_dxf = ""
-                    if m[4] and os.path.exists(m[4]):
-                        with open(m[4], "r") as f_dxf:
+                    if m[5] and os.path.exists(m[5]):
+                        with open(m[5], "r") as f_dxf:
                             contenido_dxf = f_dxf.read()
                     else:
                         pts_base = [(0,0), (200,0), (180,120), (20,120)]
@@ -546,9 +598,9 @@ elif opcion_menu == "Catálogo de Moldes":
                     st.download_button(
                         "Descargar DXF", 
                         data=contenido_dxf, 
-                        file_name=f"{m[0].replace(' ', '_')}.dxf", 
+                        file_name=f"{m[1].replace(' ', '_')}.dxf", 
                         mime="application/dxf", 
-                        key=f"btn_dxf_{idx}"
+                        key=f"btn_dxf_{m[0]}"
                     )
         else:
             st.info("Sin archivos DXF registrados.")
