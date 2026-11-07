@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Experiencia Móvil Pro"""
+"""Leather-Flex 3D - Experiencia Cámara Nativa Móvil"""
 import os
 import json
 import sqlite3
@@ -24,17 +24,15 @@ st.set_page_config(
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 
-# ------------------------------------------------------------------ CSS Personalizado Táctil & Elegante
+# ------------------------------------------------------------------ CSS Personalizado
 st.markdown("""
 <style>
-    /* Estilo general con fondo café suave #ab9680 */
     .stApp {
         background: linear-gradient(135deg, #f3eee8 0%, #ab9680 100%) !important;
         color: #2c2520 !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     }
     
-    /* Barra lateral cristal */
     section[data-testid="stSidebar"] {
         background-color: rgba(255, 255, 255, 0.4) !important;
         backdrop-filter: blur(12px) !important;
@@ -57,7 +55,6 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
 
-    /* Opciones de menú laterales */
     div[data-testid="stRadio"] > label { display: none; }
     div[data-testid="stRadio"] > div { gap: 8px; }
     div[data-testid="stRadio"] label {
@@ -78,19 +75,8 @@ st.markdown("""
     }
     div[data-testid="stRadio"] input[type="radio"] { display: none !important; }
 
-    /* Estilos Estilo App Móvil para selección de fotos/cámara */
-    .media-card {
-        background: rgba(255, 255, 255, 0.6);
-        border: 2px dashed #8c7763;
-        border-radius: 16px;
-        padding: 20px;
-        text-align: center;
-        transition: all 0.3s ease;
-    }
-    
-    /* Tarjetas del Feed estilo Instagram */
     .feed-card {
-        background: rgba(255, 255, 255, 0.75);
+        background: rgba(255, 255, 255, 0.85);
         border-radius: 16px;
         padding: 18px;
         margin-bottom: 20px;
@@ -134,96 +120,74 @@ if not os.path.exists(ruta_cal):
     with open(ruta_cal, "w") as f:
         json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
 
-# ================================================================== MÓDULO: MURO DE TALLER (FEED CON CÁMARA/GALERÍA)
+# ================================================================== MÓDULO: MURO DE TALLER
 if opcion_menu == "Muro de Taller":
     st.title("Muro de Taller")
-    st.caption("Registro de incidencias, evidencias fotográficas e historial técnico.")
+    st.caption("Registro de incidencias y evidencias de producción.")
 
-    # Diálogo modal emergente al presionar (+)
-    @st.dialog("➕ Crear nueva publicación")
+    @st.dialog("➕ Nueva Evidencia de Taller")
     def modal_crear_post():
-        st.write("### Selecciona el origen del archivo:")
+        st.write("### Seleccionar evidencia:")
         
-        # Selector de opciones estilo botones de app móvil (Camera / Photos)
-        opcion_captura = st.radio(
-            "Origen media",
-            ["📷 Cámara (Foto en directo)", "🖼️ Fotos / Galería (Archivo)"],
-            horizontal=True,
-            label_visibility="collapsed"
+        # Subidor directo que activa la cámara nativa del teléfono (iOS / Android)
+        archivo_subido = st.file_uploader(
+            "Toma una foto/video con la cámara o elige de tu galería", 
+            type=["jpg", "png", "jpeg", "mp4", "mov"],
+            help="Al presionar se abrirá la cámara de tu celular"
         )
+
+        nota_rapida = st.text_input("Nota breve (Opcional)", placeholder="Ej. Lote A-102 / Marca en piel")
         
-        st.write("---")
-        media_file = None
-        
-        if "Cámara" in opcion_captura:
-            media_file = st.camera_input("Capturar con la cámara del celular")
-        else:
-            media_file = st.file_uploader("Seleccionar foto o video de la galería", type=["jpg", "png", "jpeg", "mp4"])
+        if st.button("Publicar en el Muro", type="primary", use_container_width=True):
+            if archivo_subido is None:
+                st.warning("Por favor captura o selecciona una foto/video.")
+            else:
+                ext = os.path.splitext(archivo_subido.name)[1]
+                if not ext:
+                    ext = ".jpg"
+                media_guardada = os.path.join(TMP, f"post_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}")
+                with open(media_guardada, "wb") as f:
+                    f.write(archivo_subido.getbuffer())
 
-        with st.form("form_guardar_post"):
-            titulo = st.text_input("Código de Lote / Pieza", placeholder="Ej. Lote A-102")
-            tipo_falla = st.selectbox("Categoría de inspección", ["Inspección Conforme", "Marcación / Venas", "Hueco / Porosidad", "Defecto Curtido", "Ajuste de Molde"])
-            descripcion = st.text_area("Observaciones del operario", placeholder="Detalla lo encontrado...")
-            solucion = st.text_area("Solución / Acción correctiva", placeholder="¿Cómo se solucionó?")
-            
-            submitted = st.form_submit_button("Publicar en Muro", type="primary", use_container_width=True)
-            if submitted:
-                if media_file is None:
-                    st.warning("Por favor toma una foto o sube un archivo antes de publicar.")
-                else:
-                    bytes_data = media_file.getvalue()
-                    ext = ".jpg" if "Cámara" in opcion_captura or media_file.name.endswith(('.jpg', '.jpeg', '.png')) else ".mp4"
-                    media_guardada = os.path.join(TMP, f"post_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}")
-                    with open(media_guardada, "wb") as f:
-                        f.write(bytes_data)
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("INSERT INTO feed (usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                          ("Operario Taller", nota_rapida or "Registro de Taller", "", "Registro", "", datetime.now().strftime("%d/%m/%Y %H:%M"), media_guardada))
+                conn.commit()
+                conn.close()
+                st.success("¡Publicado en el muro!")
+                st.rerun()
 
-                    conn = sqlite3.connect(DB_PATH)
-                    c = conn.cursor()
-                    c.execute("INSERT INTO feed (usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                              ("Operario Taller", titulo, descripcion, tipo_falla, solucion, datetime.now().strftime("%d/%m/%Y %H:%M"), media_guardada))
-                    conn.commit()
-                    conn.close()
-                    st.success("¡Publicado en el muro con éxito!")
-                    st.rerun()
-
-    # Botón Principal para abrir la ventana
-    col_btn, _ = st.columns([1, 2])
-    with col_btn:
-        if st.button("➕  Agregar foto / video a la sesión", type="primary", use_container_width=True):
-            modal_crear_post()
+    if st.button("➕  Agregar foto / video a la sesión", type="primary", use_container_width=True):
+        modal_crear_post()
 
     st.write("---")
 
-    # Mostrar Muro (Feed estilo red social)
+    # Mostrar publicaciones
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path FROM feed ORDER BY id DESC")
+    c.execute("SELECT usuario, titulo, fecha, media_path FROM feed ORDER BY id DESC")
     posts = c.fetchall()
     conn.close()
 
     if not posts:
-        st.info("Aún no hay publicaciones. Presiona el botón ➕ de arriba para tomar la primera foto.")
+        st.info("No hay evidencia registrada. Presiona ➕ para tomar la primera foto.")
     else:
         for p in posts:
-            usr, tit, desc, falla, sol, fecha, media = p
+            usr, tit, fecha, media = p
             with st.container():
                 st.markdown(f"""
                 <div class="feed-card">
                     <small style="color: #73604f; font-weight: 600;">{usr} • {fecha}</small>
-                    <h3 style="margin-top: 4px; margin-bottom: 8px; color: #2c2520;">{tit}</h3>
-                    <span style="background: #8c7763; color: white; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;">{falla}</span>
-                    <p style="margin-top: 12px; color: #3e3228;">{desc}</p>
+                    <h4 style="margin-top: 4px; margin-bottom: 8px; color: #2c2520;">{tit}</h4>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 if media and os.path.exists(media):
-                    if media.endswith(".mp4"):
+                    if media.endswith((".mp4", ".mov")):
                         st.video(media)
                     else:
                         st.image(media, use_column_width=True)
-                
-                if sol:
-                    st.success(f"💡 **Solución registrada:** {sol}")
                 st.divider()
 
 # ================================================================== MÓDULOS RESTANTES
