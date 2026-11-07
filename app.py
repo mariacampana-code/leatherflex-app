@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Plataforma Industrial SaaS"""
+"""Leather-Flex 3D - Plataforma Elegante"""
 import os
 import json
 import sqlite3
@@ -16,7 +16,7 @@ from leatherflex.config import Config
 # ------------------------------------------------------------------ Configuración de página
 st.set_page_config(
     page_title="Leather-Flex 3D",
-    page_icon="⚡",
+    page_icon="🟫",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -24,81 +24,81 @@ st.set_page_config(
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 
-# ------------------------------------------------------------------ CSS Personalizado (Diseño Profesional No-AI)
+# ------------------------------------------------------------------ CSS Personalizado Elegante (Café / Semitransparente)
 st.markdown("""
 <style>
-    /* Estilo global */
+    /* Estilo general con tono café elegancia #ab9680 */
     .stApp {
-        background-color: #0d1117;
-        color: #c9d1d9;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(135deg, #f3eee8 0%, #ab9680 100%) !important;
+        color: #2c2520 !important;
+        font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif !important;
     }
     
-    /* Barra lateral estilo Software Industrial */
+    /* Barra lateral estilo cristal traslúcido */
     section[data-testid="stSidebar"] {
-        background-color: #161b22 !important;
-        border-right: 1px solid #30363d !important;
+        background-color: rgba(255, 255, 255, 0.35) !important;
+        backdrop-filter: blur(12px) !important;
+        border-right: 1px solid rgba(171, 150, 128, 0.3) !important;
     }
     
-    /* Ocultar elementos nativos feos */
+    /* Ocultar elementos nativos de Streamlit */
     div[data-testid="stSidebarHeader"] { display: none; }
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
     
-    /* Título de Marca Custom */
+    /* Título principal de marca */
     .brand-container {
-        padding: 1rem 0.5rem;
-        border-bottom: 1px solid #30363d;
+        padding: 1.5rem 0.5rem 1rem 0.5rem;
+        border-bottom: 1px solid rgba(171, 150, 128, 0.3);
         margin-bottom: 1.5rem;
     }
     .brand-title {
-        font-size: 1.25rem;
+        font-size: 1.4rem;
         font-weight: 700;
-        color: #ffffff;
-        letter-spacing: 0.5px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .brand-badge {
-        background: #238636;
-        color: white;
-        font-size: 0.65rem;
-        padding: 2px 6px;
-        border-radius: 4px;
-        text-transform: uppercase;
-        font-weight: 600;
-    }
-    .brand-sub {
-        font-size: 0.75rem;
-        color: #8b949e;
-        margin-top: 4px;
+        color: #3e3228;
+        letter-spacing: 1px;
     }
 
-    /* Opciones del Menú Personalizadas */
+    /* Opciones de menú tipo botones minimalistas sin círculos */
     div[data-testid="stRadio"] > label { display: none; }
     div[data-testid="stRadio"] > div {
-        gap: 6px;
+        gap: 8px;
     }
     div[data-testid="stRadio"] label {
-        background: #21262d !important;
-        border: 1px solid #30363d !important;
-        border-radius: 6px !important;
-        padding: 10px 14px !important;
-        color: #c9d1d9 !important;
-        font-weight: 500 !important;
-        font-size: 0.9rem !important;
-        transition: all 0.2s ease !important;
+        background: rgba(255, 255, 255, 0.4) !important;
+        border: 1px solid rgba(171, 150, 128, 0.4) !important;
+        border-radius: 8px !important;
+        padding: 12px 16px !important;
+        color: #4a3e35 !important;
+        font-weight: 600 !important;
+        font-size: 0.95rem !important;
+        transition: all 0.25s ease !important;
         cursor: pointer !important;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.03);
     }
     div[data-testid="stRadio"] label:hover {
-        background: #30363d !important;
-        color: #ffffff !important;
-        border-color: #8b949e !important;
+        background: rgba(255, 255, 255, 0.75) !important;
+        color: #2c2520 !important;
+        border-color: #8c7763 !important;
     }
     div[data-testid="stRadio"] label[data-checked="true"] {
-        background: #1f6feb !important;
+        background: #8c7763 !important;
         color: #ffffff !important;
-        border-color: #388bfd !important;
-        box-shadow: 0 0 10px rgba(31, 111, 235, 0.4);
+        border-color: #73604f !important;
+        box-shadow: 0 4px 12px rgba(140, 119, 99, 0.25) !important;
+    }
+
+    /* Ocultar los botones redondos del radio button */
+    div[data-testid="stRadio"] input[type="radio"] {
+        display: none !important;
+    }
+
+    /* Tarjetas principales de la app */
+    div[data-testid="stExpander"], div[data-testid="stForm"] {
+        background: rgba(255, 255, 255, 0.5) !important;
+        border: 1px solid rgba(255, 255, 255, 0.6) !important;
+        border-radius: 12px !important;
+        backdrop-filter: blur(8px) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -118,15 +118,11 @@ def init_db():
 
 init_db()
 
-# ------------------------------------------------------------------ Encabezado Lateral Custom
+# ------------------------------------------------------------------ Encabezado Lateral Limpio
 with st.sidebar:
     st.markdown("""
         <div class="brand-container">
-            <div class="brand-title">
-                LEATHER-FLEX 3D
-                <span class="brand-badge">PRO v2.4</span>
-            </div>
-            <div class="brand-sub">Sistema de Inspección & Corte CAD/CAM</div>
+            <div class="brand-title">LEATHER-FLEX 3D</div>
         </div>
     """, unsafe_allow_html=True)
     
@@ -334,7 +330,7 @@ elif opcion_menu == "Muro de Taller":
 
     for p in posts:
         usr, tit, desc, falla, sol, fecha, media = p
-        st.markdown(f"### {tit} · <small style='color:#8b949e;'>{fecha}</small>", unsafe_allow_html=True)
+        st.markdown(f"### {tit} · <small style='color:#73604f;'>{fecha}</small>", unsafe_allow_html=True)
         st.write(f"**Categoría:** {falla} | **Notas:** {desc}")
         if media and os.path.exists(media):
             if media.endswith(".mp4"):
