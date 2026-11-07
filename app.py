@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Plataforma Elegante Limpia"""
+"""Leather-Flex 3D - Experiencia Móvil Pro"""
 import os
 import json
 import sqlite3
@@ -24,81 +24,78 @@ st.set_page_config(
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 
-# ------------------------------------------------------------------ CSS Personalizado Elegante
+# ------------------------------------------------------------------ CSS Personalizado Táctil & Elegante
 st.markdown("""
 <style>
-    /* Estilo general con tono café elegancia #ab9680 */
+    /* Estilo general con fondo café suave #ab9680 */
     .stApp {
         background: linear-gradient(135deg, #f3eee8 0%, #ab9680 100%) !important;
         color: #2c2520 !important;
-        font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     }
     
-    /* Barra lateral estilo cristal traslúcido */
+    /* Barra lateral cristal */
     section[data-testid="stSidebar"] {
-        background-color: rgba(255, 255, 255, 0.35) !important;
+        background-color: rgba(255, 255, 255, 0.4) !important;
         backdrop-filter: blur(12px) !important;
         border-right: 1px solid rgba(171, 150, 128, 0.3) !important;
     }
     
-    /* Ocultar elementos nativos de Streamlit */
     div[data-testid="stSidebarHeader"] { display: none; }
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
     
-    /* Título principal de marca */
     .brand-container {
-        padding: 1.5rem 0.5rem 1rem 0.5rem;
+        padding: 1.2rem 0.5rem;
         border-bottom: 1px solid rgba(171, 150, 128, 0.3);
-        margin-bottom: 1.5rem;
+        margin-bottom: 1rem;
     }
     .brand-title {
-        font-size: 1.4rem;
+        font-size: 1.3rem;
         font-weight: 700;
         color: #3e3228;
-        letter-spacing: 1px;
+        letter-spacing: 0.5px;
     }
 
-    /* Opciones de menú tipo botones minimalistas sin círculos */
+    /* Opciones de menú laterales */
     div[data-testid="stRadio"] > label { display: none; }
-    div[data-testid="stRadio"] > div {
-        gap: 8px;
-    }
+    div[data-testid="stRadio"] > div { gap: 8px; }
     div[data-testid="stRadio"] label {
-        background: rgba(255, 255, 255, 0.4) !important;
+        background: rgba(255, 255, 255, 0.45) !important;
         border: 1px solid rgba(171, 150, 128, 0.4) !important;
-        border-radius: 8px !important;
+        border-radius: 10px !important;
         padding: 12px 16px !important;
         color: #4a3e35 !important;
         font-weight: 600 !important;
         font-size: 0.95rem !important;
-        transition: all 0.25s ease !important;
-        cursor: pointer !important;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.03);
-    }
-    div[data-testid="stRadio"] label:hover {
-        background: rgba(255, 255, 255, 0.75) !important;
-        color: #2c2520 !important;
-        border-color: #8c7763 !important;
+        transition: all 0.2s ease !important;
     }
     div[data-testid="stRadio"] label[data-checked="true"] {
         background: #8c7763 !important;
         color: #ffffff !important;
         border-color: #73604f !important;
-        box-shadow: 0 4px 12px rgba(140, 119, 99, 0.25) !important;
+        box-shadow: 0 4px 12px rgba(140, 119, 99, 0.3) !important;
     }
+    div[data-testid="stRadio"] input[type="radio"] { display: none !important; }
 
-    /* Ocultar los botones redondos del radio button */
-    div[data-testid="stRadio"] input[type="radio"] {
-        display: none !important;
+    /* Estilos Estilo App Móvil para selección de fotos/cámara */
+    .media-card {
+        background: rgba(255, 255, 255, 0.6);
+        border: 2px dashed #8c7763;
+        border-radius: 16px;
+        padding: 20px;
+        text-align: center;
+        transition: all 0.3s ease;
     }
-
-    /* Tarjetas principales de la app */
-    div[data-testid="stExpander"], div[data-testid="stForm"] {
-        background: rgba(255, 255, 255, 0.5) !important;
-        border: 1px solid rgba(255, 255, 255, 0.6) !important;
-        border-radius: 12px !important;
-        backdrop-filter: blur(8px) !important;
+    
+    /* Tarjetas del Feed estilo Instagram */
+    .feed-card {
+        background: rgba(255, 255, 255, 0.75);
+        border-radius: 16px;
+        padding: 18px;
+        margin-bottom: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.05);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -118,7 +115,7 @@ def init_db():
 
 init_db()
 
-# ------------------------------------------------------------------ Encabezado Lateral Limpio con 5 Módulos
+# ------------------------------------------------------------------ Barra Lateral
 with st.sidebar:
     st.markdown("""
         <div class="brand-container">
@@ -128,7 +125,7 @@ with st.sidebar:
     
     opcion_menu = st.radio(
         "Navegacion",
-        ["Escaneo y Acomodo", "Calibración de Escáner", "Muro de Taller", "Catálogo de Moldes", "Biblioteca Técnica"],
+        ["Muro de Taller", "Escaneo y Acomodo", "Calibración de Escáner", "Catálogo de Moldes", "Biblioteca Técnica"],
         label_visibility="collapsed"
     )
 
@@ -137,8 +134,100 @@ if not os.path.exists(ruta_cal):
     with open(ruta_cal, "w") as f:
         json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
 
-# ================================================================== MÓDULOS
-if opcion_menu == "Escaneo y Acomodo":
+# ================================================================== MÓDULO: MURO DE TALLER (FEED CON CÁMARA/GALERÍA)
+if opcion_menu == "Muro de Taller":
+    st.title("Muro de Taller")
+    st.caption("Registro de incidencias, evidencias fotográficas e historial técnico.")
+
+    # Diálogo modal emergente al presionar (+)
+    @st.dialog("➕ Crear nueva publicación")
+    def modal_crear_post():
+        st.write("### Selecciona el origen del archivo:")
+        
+        # Selector de opciones estilo botones de app móvil (Camera / Photos)
+        opcion_captura = st.radio(
+            "Origen media",
+            ["📷 Cámara (Foto en directo)", "🖼️ Fotos / Galería (Archivo)"],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        
+        st.write("---")
+        media_file = None
+        
+        if "Cámara" in opcion_captura:
+            media_file = st.camera_input("Capturar con la cámara del celular")
+        else:
+            media_file = st.file_uploader("Seleccionar foto o video de la galería", type=["jpg", "png", "jpeg", "mp4"])
+
+        with st.form("form_guardar_post"):
+            titulo = st.text_input("Código de Lote / Pieza", placeholder="Ej. Lote A-102")
+            tipo_falla = st.selectbox("Categoría de inspección", ["Inspección Conforme", "Marcación / Venas", "Hueco / Porosidad", "Defecto Curtido", "Ajuste de Molde"])
+            descripcion = st.text_area("Observaciones del operario", placeholder="Detalla lo encontrado...")
+            solucion = st.text_area("Solución / Acción correctiva", placeholder="¿Cómo se solucionó?")
+            
+            submitted = st.form_submit_button("Publicar en Muro", type="primary", use_container_width=True)
+            if submitted:
+                if media_file is None:
+                    st.warning("Por favor toma una foto o sube un archivo antes de publicar.")
+                else:
+                    bytes_data = media_file.getvalue()
+                    ext = ".jpg" if "Cámara" in opcion_captura or media_file.name.endswith(('.jpg', '.jpeg', '.png')) else ".mp4"
+                    media_guardada = os.path.join(TMP, f"post_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}")
+                    with open(media_guardada, "wb") as f:
+                        f.write(bytes_data)
+
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    c.execute("INSERT INTO feed (usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                              ("Operario Taller", titulo, descripcion, tipo_falla, solucion, datetime.now().strftime("%d/%m/%Y %H:%M"), media_guardada))
+                    conn.commit()
+                    conn.close()
+                    st.success("¡Publicado en el muro con éxito!")
+                    st.rerun()
+
+    # Botón Principal para abrir la ventana
+    col_btn, _ = st.columns([1, 2])
+    with col_btn:
+        if st.button("➕  Agregar foto / video a la sesión", type="primary", use_container_width=True):
+            modal_crear_post()
+
+    st.write("---")
+
+    # Mostrar Muro (Feed estilo red social)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path FROM feed ORDER BY id DESC")
+    posts = c.fetchall()
+    conn.close()
+
+    if not posts:
+        st.info("Aún no hay publicaciones. Presiona el botón ➕ de arriba para tomar la primera foto.")
+    else:
+        for p in posts:
+            usr, tit, desc, falla, sol, fecha, media = p
+            with st.container():
+                st.markdown(f"""
+                <div class="feed-card">
+                    <small style="color: #73604f; font-weight: 600;">{usr} • {fecha}</small>
+                    <h3 style="margin-top: 4px; margin-bottom: 8px; color: #2c2520;">{tit}</h3>
+                    <span style="background: #8c7763; color: white; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;">{falla}</span>
+                    <p style="margin-top: 12px; color: #3e3228;">{desc}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if media and os.path.exists(media):
+                    if media.endswith(".mp4"):
+                        st.video(media)
+                    else:
+                        st.image(media, use_column_width=True)
+                
+                if sol:
+                    st.success(f"💡 **Solución registrada:** {sol}")
+                st.divider()
+
+# ================================================================== MÓDULOS RESTANTES
+elif opcion_menu == "Escaneo y Acomodo":
     st.title("Escaneo y Acomodo de Moldes")
     st.caption("Inspección óptica de imperfecciones y cálculo de nidificación (Nesting).")
 
@@ -264,7 +353,6 @@ if opcion_menu == "Escaneo y Acomodo":
         t1.image(os.path.join(salida, "resultado.jpg"), use_column_width=True)
         t2.dataframe([{"N°": i + 1, "Tipo": d["tipo"], "Área (mm²)": d["area_mm2"]} for i, d in enumerate(info["lista_defectos"])], use_column_width=True)
 
-# ================================================================== MÓDULO 2: CALIBRACIÓN (NUEVO PUNTO SEPARADO)
 elif opcion_menu == "Calibración de Escáner":
     st.title("Calibración del Sistema Óptico")
     st.caption("Ajuste de parámetros de cámara, escala de milímetros por píxel y corrección de plano.")
@@ -292,64 +380,9 @@ elif opcion_menu == "Calibración de Escáner":
             gan = calibracion.campo_plano(cv2.imdecode(np.frombuffer(f_bla.getbuffer(), np.uint8), cv2.IMREAD_COLOR)) if f_bla else None
             calibracion.guardar(cal, gan, ruta_cal)
             st.session_state["cal"] = cal
-            st.success(" Escáner Calibrado y configurado correctamente.")
+            st.success("Escáner Calibrado y configurado correctamente.")
         except Exception as e:
             st.error(f"Error durante la calibración: {e}")
-
-elif opcion_menu == "Muro de Taller":
-    st.title("Muro del Taller - Registro de Calidad")
-    st.caption("Historial de producción, evidencias de defectos y registro de soluciones.")
-    
-    with st.expander("➕ Nueva Publicación de Taller"):
-        with st.form("nuevo_post"):
-            titulo = st.text_input("Código / Lote")
-            tipo_falla = st.selectbox("Categoría", ["Normal", "Marcación / Venas", "Hueco / Porosidad", "Curtido", "Molde"])
-            descripcion = st.text_area("Observaciones")
-            solucion = st.text_area("Solución Aplicada")
-            
-            foto_camara = st.camera_input("Captura con cámara")
-            archivo_subido = st.file_uploader("O subir archivo", type=["jpg", "png", "mp4"])
-            
-            if st.form_submit_button("Publicar en Historial", type="primary"):
-                media_guardada = ""
-                if foto_camara:
-                    bytes_data = foto_camara.getvalue()
-                    media_guardada = os.path.join(TMP, f"post_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
-                    with open(media_guardada, "wb") as f:
-                        f.write(bytes_data)
-                elif archivo_subido:
-                    media_guardada = os.path.join(TMP, f"post_{archivo_subido.name}")
-                    with open(media_guardada, "wb") as f:
-                        f.write(archivo_subido.getbuffer())
-
-                if media_guardada:
-                    conn = sqlite3.connect(DB_PATH)
-                    c = conn.cursor()
-                    c.execute("INSERT INTO feed (usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                              ("Operario Taller", titulo, descripcion, tipo_falla, solucion, datetime.now().strftime("%d/%m/%Y %H:%M"), media_guardada))
-                    conn.commit()
-                    conn.close()
-                    st.success("Publicado")
-                    st.rerun()
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path FROM feed ORDER BY id DESC")
-    posts = c.fetchall()
-    conn.close()
-
-    for p in posts:
-        usr, tit, desc, falla, sol, fecha, media = p
-        st.markdown(f"### {tit} · <small style='color:#73604f;'>{fecha}</small>", unsafe_allow_html=True)
-        st.write(f"**Categoría:** {falla} | **Notas:** {desc}")
-        if media and os.path.exists(media):
-            if media.endswith(".mp4"):
-                st.video(media)
-            else:
-                st.image(media, width=400)
-        if sol:
-            st.info(f"Solución: {sol}")
-        st.divider()
 
 elif opcion_menu == "Catálogo de Moldes":
     st.title("Catálogo Digital de Moldes")
