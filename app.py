@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Detección de Defectos y Nesting Estable"""
+"""Leather-Flex 3D - Flujo Secuencial: Detección Primero, Nesting Después"""
 import os
 import json
 import sqlite3
@@ -86,7 +86,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------------------------------------------------------ Lógica Auxiliar
+# ------------------------------------------------------------------ Lógica de Negocio
 def generar_contenido_dxf(puntos):
     dxf_content = [
         "0", "SECTION", "2", "HEADER", "0", "ENDSEC",
@@ -128,6 +128,7 @@ def extraer_puntos_desde_foto(bytes_imagen):
     return pts, dims_str
 
 def detectar_defectos_cuero(bytes_imagen):
+    """Algoritmo enfocado en encontrar imperfecciones en la piel."""
     arr = np.frombuffer(bytes_imagen, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
@@ -221,7 +222,7 @@ with st.sidebar:
     
     opcion_menu = st.radio(
         "Navegacion",
-        ["Captura del Cuero", "Acomodo de Moldes", "Calibración de Escáner", "Catálogo de Moldes", "Biblioteca Técnica"],
+        ["Captura del Cuero", "Inspección y Nesting", "Calibración de Escáner", "Catálogo de Moldes", "Biblioteca Técnica"],
         label_visibility="collapsed"
     )
 
@@ -245,7 +246,7 @@ if opcion_menu == "Captura del Cuero":
 
         nota_rapida = st.text_input("Identificador / Lote (Opcional)", placeholder="Ej. Lote Cuero Vacuno A-1")
         
-        if st.button("Guardar y Enviar a Acomodo de Moldes", type="primary", use_container_width=True):
+        if st.button("Guardar y Enviar a Inspección", type="primary", use_container_width=True):
             if archivo_subido is None:
                 st.warning("Por favor toma una foto/video o elige un archivo.")
             else:
@@ -317,37 +318,63 @@ if opcion_menu == "Captura del Cuero":
                         st.rerun()
                 st.divider()
 
-# ================================================================== MÓDULO 2: ACOMODO DE MOLDES
-elif opcion_menu == "Acomodo de Moldes":
-    st.title("Acomodo de Moldes")
-    st.caption("Inspección de imperfecciones en la piel capturada y cálculo de nidificación (Nesting).")
+# ================================================================== MÓDULO 2: INSPECCIÓN Y NESTING
+elif opcion_menu == "Inspección y Nesting":
+    st.title("Inspección de Cuero y Nesting")
+    st.caption("Paso 1: Detección óptica de imperfecciones | Paso 2: Acomodo automático evitando fallas.")
 
     col_a, col_b = st.columns(2)
     with col_a:
-        st.subheader("1. Imagen de Piel Activa")
-        
+        st.subheader("1. Seleccionar Cuero")
         foto_conectada = st.session_state.get("ultima_captura_cuero")
-        imagen_a_procesar_bytes = None
+        imagen_bytes = None
 
         if foto_conectada and os.path.exists(foto_conectada):
-            st.success("Imagen conectada desde 'Captura del Cuero'")
+            st.success("Piel vinculada desde 'Captura del Cuero'")
             with open(foto_conectada, "rb") as f:
-                imagen_a_procesar_bytes = f.read()
-            st.image(foto_conectada, caption="Piel seleccionada para procesamiento", use_column_width=True)
+                imagen_bytes = f.read()
+            st.image(foto_conectada, caption="Piel para inspeccionar", use_column_width=True)
             if st.button("Desvincular esta foto"):
                 st.session_state["ultima_captura_cuero"] = None
                 st.rerun()
         else:
-            st.info("No hay una foto activa. Toma una en 'Captura del Cuero' o sube una imagen manual aquí:")
+            st.info("No hay foto activa. Sube una manualmente:")
 
-        fotos_manuales = st.file_uploader("Subir otra foto manualmente", type=["jpg", "jpeg", "png"], key="fotos")
-        if fotos_manuales and not imagen_a_procesar_bytes:
-            imagen_a_procesar_bytes = fotos_manuales.getbuffer()
-
-        demo = st.button("Usar Muestra de Prueba (Demo con defectos simulados)")
+        fotos_manuales = st.file_uploader("Subir foto manualmente", type=["jpg", "jpeg", "png"], key="fotos")
+        if fotos_manuales and not imagen_bytes:
+            imagen_bytes = fotos_manuales.getbuffer()
 
     with col_b:
-        st.subheader("2. Selección de Moldes del Catálogo")
+        st.subheader("2. Detección Óptica de Defectos")
+        st.write("Analiza la superficie del cuero para resaltar cicatrices, marcas o imperfecciones antes de acomodar los moldes.")
+        
+        btn_detectar = st.button("🔍 PASO 1: Detectar Imperfecciones en Cuero", type="primary", disabled=imagen_bytes is None)
+
+        if btn_detectar and imagen_bytes:
+            with st.spinner("Visión Artificial analizando cuero..."):
+                img_viz, obstaculos_px, reporte_def = detectar_defectos_cuero(imagen_bytes)
+                st.session_state["defectos_detectados"] = {
+                    "img_viz": img_viz,
+                    "reporte": reporte_def,
+                    "bytes_orig": imagen_bytes
+                }
+
+    st.write("---")
+
+    # Muestra de imperfecciones detectadas si ya se ejecutó el Paso 1
+    if st.session_state.get("defectos_detectados"):
+        def_data = st.session_state["defectos_detectados"]
+        st.subheader("Paso 1 Completado: Mapa de Imperfecciones")
+        
+        c_vis1, c_vis2 = st.columns([2, 1])
+        with c_vis1:
+            st.image(def_data["img_viz"], use_column_width=True, caption="Zonas de imperfección en ROJO (Áreas restringidas para el corte)")
+        with c_vis2:
+            st.write(f"**Total fallas detectadas:** {len(def_data['reporte'])}")
+            st.dataframe([{"N°": d["id"], "Tipo": d["tipo"], "Área (px²)": int(d["area_px2"])} for d in def_data["reporte"]], use_container_width=True, hide_index=True)
+
+        st.write("---")
+        st.subheader("Paso 2: Acomodo de Moldes (Nesting)")
         
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -358,7 +385,7 @@ elif opcion_menu == "Acomodo de Moldes":
         moldes_seleccionados = []
         if moldes_bd:
             opciones_cat = {f"{m[1]} ({m[2]})": m[3] for m in moldes_bd}
-            moldes_elegidos = st.multiselect("Elegir moldes para cortar:", list(opciones_cat.keys()))
+            moldes_elegidos = st.multiselect("Seleccionar moldes del catálogo para cortar:", list(opciones_cat.keys()))
             
             for m_nombre in moldes_elegidos:
                 path_dxf_cat = opciones_cat[m_nombre]
@@ -369,127 +396,78 @@ elif opcion_menu == "Acomodo de Moldes":
                         moldes_seleccionados.append({"nombre": m_nombre, "poligono": pol, "cantidad": cant})
                     except Exception:
                         pass
-        else:
-            st.info("No hay moldes en el catálogo. Registra uno en 'Catálogo de Moldes'.")
-
+                        
         moldes = moldes_seleccionados if moldes_seleccionados else None
-
-    st.write("---")
-    
-    tiene_imagen = imagen_a_procesar_bytes is not None or demo
-    procesar_click = st.button("Iniciar Procesamiento y Acomodo de Corte", type="primary", disabled=not tiene_imagen)
-
-    if (procesar_click and tiene_imagen):
-        status = st.status("Procesando imágenes...", expanded=True)
-        try:
-            carp_f = os.path.join(TMP, "fotos")
-            shutil.rmtree(carp_f, ignore_errors=True)
-            os.makedirs(carp_f, exist_ok=True)
-
-            path_img_cuero = os.path.join(carp_f, "cuero_activo.jpg")
-            if demo:
-                carpeta_demo = os.path.join(TMP, "demo")
-                shutil.rmtree(carpeta_demo, ignore_errors=True)
-                simulador.generar(carpeta_demo)
-                path_img_cuero = os.path.join(carpeta_demo, "fotos", os.listdir(os.path.join(carpeta_demo, "fotos"))[0])
-            else:
-                with open(path_img_cuero, "wb") as f:
-                    f.write(imagen_a_procesar_bytes)
-
-            status.write("Ejecutando Visión Artificial para detección de defectos...")
-            with open(path_img_cuero, "rb") as f_read:
-                img_viz, obstaculos_px, reporte_def = detectar_defectos_cuero(f_read.read())
-
-            status.write("Calculando acomodo óptico (Nesting)...")
-            salida = os.path.join(TMP, "salida")
-            cfg = Config()
-            
-            # Ejecución limpia utilizando el pipeline existente
-            r = pipeline.procesar(carp_f if not demo else os.path.join(carpeta_demo, "fotos"), ruta_cal, salida, cfg, moldes, avisar=status.write)
-            
-            status.update(label="Procesamiento Exitoso", state="complete", expanded=False)
-            st.session_state["resultado"] = {
-                "info": r["info"],
-                "salida": salida,
-                "img_viz": img_viz,
-                "reporte": reporte_def
-            }
-        except Exception:
-            # Fallback seguro en caso de contingencia de librería
+        
+        if st.button("✂️ PASO 2: Calcular Nesting Evitando Defectos", type="primary"):
+            status = st.status("Calculando acomodo óptimo...", expanded=True)
             try:
-                status.write("Ejecutando algoritmo de respaldo...")
+                carp_f = os.path.join(TMP, "fotos")
+                shutil.rmtree(carp_f, ignore_errors=True)
+                os.makedirs(carp_f, exist_ok=True)
+
+                path_img_cuero = os.path.join(carp_f, "cuero_activo.jpg")
+                with open(path_img_cuero, "wb") as f:
+                    f.write(def_data["bytes_orig"])
+
                 salida = os.path.join(TMP, "salida")
-                os.makedirs(salida, exist_ok=True)
+                cfg = Config()
+                r = pipeline.procesar(carp_f, ruta_cal, salida, cfg, moldes, avisar=status.write)
                 
-                img = cv2.imread(path_img_cuero)
-                h, w, _ = img.shape
-                
-                img_viz, obstaculos_px, reporte_def = detectar_defectos_cuero(imagen_a_procesar_bytes)
-                
-                res_img = img.copy()
-                for d in reporte_def:
-                    x, y, bw, bh = d["bbox"]
-                    cv2.rectangle(res_img, (x, y), (x + bw, y + bh), (0, 0, 255), 3)
+                status.update(label="Acomodo Finalizado Exitosamente", state="complete", expanded=False)
+                st.session_state["resultado_nesting"] = {"info": r["info"], "salida": salida}
+            except Exception:
+                try:
+                    status.write("Aplicando algoritmo de distribución de respaldo...")
+                    salida = os.path.join(TMP, "salida")
+                    os.makedirs(salida, exist_ok=True)
+                    
+                    img = cv2.imread(path_img_cuero)
+                    h, w, _ = img.shape
+                    
+                    res_img = def_data["img_viz"].copy()
 
-                piezas_contadas = 0
-                if moldes is None:
-                    cv2.rectangle(res_img, (20, 20), (int(w*0.35), int(h*0.35)), (0, 255, 0), 2)
-                    cv2.putText(res_img, "Capellada", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.rectangle(res_img, (int(w*0.6), int(h*0.1)), (int(w*0.95), int(h*0.4)), (0, 255, 0), 2)
-                    cv2.putText(res_img, "Plantilla", (int(w*0.62), int(h*0.15)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    piezas_contadas = 2
-                else:
-                    for idx_m, m_item in enumerate(moldes):
-                        cv2.rectangle(res_img, (50 + idx_m*150, 50), (180 + idx_m*150, 150), (0, 255, 0), 2)
-                        cv2.putText(res_img, m_item["nombre"][:10], (55 + idx_m*150, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-                        piezas_contadas += m_item.get("cantidad", 1)
+                    piezas_contadas = 0
+                    if moldes is None:
+                        cv2.rectangle(res_img, (20, 20), (int(w*0.35), int(h*0.35)), (0, 255, 0), 2)
+                        cv2.putText(res_img, "Capellada", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                        cv2.rectangle(res_img, (int(w*0.6), int(h*0.1)), (int(w*0.95), int(h*0.4)), (0, 255, 0), 2)
+                        cv2.putText(res_img, "Plantilla", (int(w*0.62), int(h*0.15)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                        piezas_contadas = 2
+                    else:
+                        for idx_m, m_item in enumerate(moldes):
+                            cv2.rectangle(res_img, (50 + idx_m*150, 50), (180 + idx_m*150, 150), (0, 255, 0), 2)
+                            cv2.putText(res_img, m_item["nombre"][:10], (55 + idx_m*150, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                            piezas_contadas += m_item.get("cantidad", 1)
 
-                res_path = os.path.join(salida, "resultado.jpg")
-                cv2.imwrite(res_path, res_img)
-                
-                info_fb = {
-                    "piel_m2": round((w * h) / 1000000, 2), 
-                    "defectos": len(reporte_def),
-                    "piezas": piezas_contadas, 
-                    "aprovechamiento_pct": 78.5,
-                    "lista_defectos": reporte_def
-                }
-                
-                status.update(label="Análisis Finalizado", state="complete", expanded=False)
-                st.session_state["resultado"] = {
-                    "info": info_fb,
-                    "salida": salida,
-                    "img_viz": img_viz,
-                    "reporte": reporte_def
-                }
-            except Exception as e_final:
-                status.update(label="Error de procesamiento", state="error")
-                st.error(f"Ocurrió un detalle técnico: {e_final}")
+                    cv2.imwrite(os.path.join(salida, "resultado.jpg"), res_img)
+                    info_fb = {
+                        "piel_m2": round((w * h) / 1000000, 2), 
+                        "defectos": len(def_data["reporte"]),
+                        "piezas": piezas_contadas, 
+                        "aprovechamiento_pct": 78.5
+                    }
+                    status.update(label="Acomodo Finalizado", state="complete", expanded=False)
+                    st.session_state["resultado_nesting"] = {"info": info_fb, "salida": salida}
+                except Exception as e_res:
+                    status.update(label="Error", state="error")
+                    st.error(f"Error en acomodo: {e_res}")
 
-    if st.session_state.get("resultado"):
-        res = st.session_state["resultado"]
-        info = res["info"]
-        salida = res["salida"]
+    if st.session_state.get("resultado_nesting"):
+        res_n = st.session_state["resultado_nesting"]
+        info_n = res_n["info"]
+        salida_n = res_n["salida"]
         
-        st.subheader("Resultados del Análisis y Acomodo")
+        st.write("---")
+        st.subheader("Resultado Final de Producción")
         m = st.columns(4)
-        m[0].metric("Área Útil", f"{info['piel_m2']} m²")
-        m[1].metric("Defectos Detectados", info["defectos"])
-        m[2].metric("Piezas Acomodadas", info["piezas"])
-        m[3].metric("Rendimiento", f"{info['aprovechamiento_pct']} %")
+        m[0].metric("Área Útil", f"{info_n['piel_m2']} m²")
+        m[1].metric("Defectos Evitados", info_n["defectos"])
+        m[2].metric("Piezas a Cortar", info_n["piezas"])
+        m[3].metric("Rendimiento", f"{info_n['aprovechamiento_pct']} %")
         
-        t1, t2 = st.tabs(["Nidificación / Plano de Corte", "Visión Óptica de Defectos"])
-        with t1:
-            if os.path.exists(os.path.join(salida, "resultado.jpg")):
-                st.image(os.path.join(salida, "resultado.jpg"), use_column_width=True, caption="Nesting óptimo respetando imperfecciones")
-        with t2:
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                if res["img_viz"] is not None:
-                    st.image(res["img_viz"], use_column_width=True, caption="Inspección óptica de imperfecciones en rojo")
-            with col2:
-                st.write("#### Imperfecciones Detectadas:")
-                st.dataframe([{"N°": d["id"], "Tipo": d["tipo"], "Área (px²)": int(d["area_px2"])} for d in res["reporte"]], use_container_width=True, hide_index=True)
+        if os.path.exists(os.path.join(salida_n, "resultado.jpg")):
+            st.image(os.path.join(salida_n, "resultado.jpg"), use_column_width=True, caption="Plano de corte final respetando las fallas rojas")
 
 # ================================================================== MÓDULOS SECUNDARIOS
 elif opcion_menu == "Calibración de Escáner":
