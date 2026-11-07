@@ -1,4 +1,4 @@
-"""Interfaz Profesional SaaS - Leather-Flex 3D. Ejecutar: python -m streamlit run app.py"""
+"""Leather-Flex 3D - Plataforma Industrial SaaS"""
 import os
 import json
 import sqlite3
@@ -13,70 +13,93 @@ import streamlit as st
 from leatherflex import calibracion, pipeline, acomodo, simulador
 from leatherflex.config import Config
 
-# ------------------------------------------------------------------ 1. Configuración & Estilos CSS Premium
-st.set_page_config(page_title="Leather-Flex 3D | Platform", page_icon="🟫", layout="wide")
+# ------------------------------------------------------------------ Configuración de página
+st.set_page_config(
+    page_title="Leather-Flex 3D",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 
-# Inyección de CSS para un diseño industrial sobrio y elegante
+# ------------------------------------------------------------------ CSS Personalizado (Diseño Profesional No-AI)
 st.markdown("""
 <style>
-    /* Estructura general */
+    /* Estilo global */
     .stApp {
-        background-color: #F8FAFC;
-        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        background-color: #0d1117;
+        color: #c9d1d9;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     
-    /* Encabezados y títulos */
-    h1, h2, h3 {
-        color: #0F172A !important;
-        font-weight: 700 !important;
-        letter-spacing: -0.5px;
+    /* Barra lateral estilo Software Industrial */
+    section[data-testid="stSidebar"] {
+        background-color: #161b22 !important;
+        border-right: 1px solid #30363d !important;
     }
     
-    /* Tarjetas contenedoras (Cards) */
-    .custom-card {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 12px;
-        padding: 24px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-    }
+    /* Ocultar elementos nativos feos */
+    div[data-testid="stSidebarHeader"] { display: none; }
     
-    /* Métrica / KPIs personalizados */
-    div[data-testid="stMetricValue"] {
-        font-size: 28px !important;
-        font-weight: 700 !important;
-        color: #C26D47 !important;
+    /* Título de Marca Custom */
+    .brand-container {
+        padding: 1rem 0.5rem;
+        border-bottom: 1px solid #30363d;
+        margin-bottom: 1.5rem;
     }
-    
-    /* Botones primarios */
-    .stButton>button[kind="primary"] {
-        background-color: #C26D47 !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        padding: 0.6rem 1.2rem !important;
-        transition: all 0.2s ease;
+    .brand-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #ffffff;
+        letter-spacing: 0.5px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
-    .stButton>button[kind="primary"]:hover {
-        background-color: #A55634 !important;
-        box-shadow: 0 4px 12px rgba(194, 109, 71, 0.3);
+    .brand-badge {
+        background: #238636;
+        color: white;
+        font-size: 0.65rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        font-weight: 600;
+    }
+    .brand-sub {
+        font-size: 0.75rem;
+        color: #8b949e;
+        margin-top: 4px;
     }
 
-    /* Barra lateral */
-    section[data-testid="stSidebar"] {
-        background-color: #0F172A !important;
+    /* Opciones del Menú Personalizadas */
+    div[data-testid="stRadio"] > label { display: none; }
+    div[data-testid="stRadio"] > div {
+        gap: 6px;
     }
-    section[data-testid="stSidebar"] * {
-        color: #F8FAFC !important;
+    div[data-testid="stRadio"] label {
+        background: #21262d !important;
+        border: 1px solid #30363d !important;
+        border-radius: 6px !important;
+        padding: 10px 14px !important;
+        color: #c9d1d9 !important;
+        font-weight: 500 !important;
+        font-size: 0.9rem !important;
+        transition: all 0.2s ease !important;
+        cursor: pointer !important;
     }
-    
-    /* Ocultar elementos innecesarios */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+    div[data-testid="stRadio"] label:hover {
+        background: #30363d !important;
+        color: #ffffff !important;
+        border-color: #8b949e !important;
+    }
+    div[data-testid="stRadio"] label[data-checked="true"] {
+        background: #1f6feb !important;
+        color: #ffffff !important;
+        border-color: #388bfd !important;
+        box-shadow: 0 0 10px rgba(31, 111, 235, 0.4);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -95,35 +118,42 @@ def init_db():
 
 init_db()
 
-# ------------------------------------------------------------------ 2. Navegación Lateral Sobria
+# ------------------------------------------------------------------ Encabezado Lateral Custom
 with st.sidebar:
-    st.markdown("## 🟫 **Leather-Flex 3D**")
-    st.caption("Plataforma Industrial de Gestión y Corte")
-    st.write("---")
+    st.markdown("""
+        <div class="brand-container">
+            <div class="brand-title">
+                LEATHER-FLEX 3D
+                <span class="brand-badge">PRO v2.4</span>
+            </div>
+            <div class="brand-sub">Sistema de Inspección & Corte CAD/CAM</div>
+        </div>
+    """, unsafe_allow_html=True)
+    
     opcion_menu = st.radio(
-        "MÓDULOS DE TRABAJO",
-        ["🛠️ Escaneo y Acomodo", "📸 Muro de Taller (Feed)", "📦 Catálogo de Moldes", "🎥 Biblioteca Técnica"]
+        "Navegacion",
+        ["Escaneo y Acomodo", "Muro de Taller", "Catálogo de Moldes", "Biblioteca Técnica"],
+        label_visibility="collapsed"
     )
-    st.write("---")
-    st.caption("v2.4 Pro · Sistema SaaS Activo")
 
-# ================================================================== MÓDULO 1: ESCANEO Y ACOMODO
-if opcion_menu == "🛠️ Escaneo y Acomodo":
+# ================================================================== MÓDULOS
+if opcion_menu == "Escaneo y Acomodo":
     st.title("Escaneo y Acomodo de Moldes")
-    st.caption("Análisis óptico de imperfecciones y optimización de corte en tiempo real.")
+    st.caption("Inspección óptica de imperfecciones y cálculo de nidificación (Nesting).")
 
     with st.sidebar:
-        st.markdown("### Configuración del Escáner")
+        st.write("---")
+        st.subheader("Parámetros de Calibración")
         ruta_tab = os.path.join(TMP, "tablero_para_imprimir.png")
         if not os.path.exists(ruta_tab):
             calibracion.tablero_para_imprimir(ruta_tab)
-        st.download_button("📥 Descargar Tablero de Calibración", open(ruta_tab, "rb"), "tablero_calibracion.png", "image/png")
+        st.download_button("Descargar Tablero Calibración", open(ruta_tab, "rb"), "tablero_calibracion.png", "image/png")
         
         f_tab = st.file_uploader("Foto del tablero", key="tab")
         f_bla = st.file_uploader("Hoja blanca (opcional)", key="bla")
         ruta_cal = os.path.join(TMP, "calib.json")
         
-        if f_tab and st.button("Calibrar Escáner", type="secondary"):
+        if f_tab and st.button("Calibrar Escáner"):
             try:
                 cal = calibracion.calibrar_tablero(cv2.imdecode(np.frombuffer(f_tab.getbuffer(), np.uint8), cv2.IMREAD_COLOR))
                 gan = calibracion.campo_plano(cv2.imdecode(np.frombuffer(f_bla.getbuffer(), np.uint8), cv2.IMREAD_COLOR)) if f_bla else None
@@ -131,7 +161,7 @@ if opcion_menu == "🛠️ Escaneo y Acomodo":
                 st.session_state["cal"] = cal
                 st.success("Escáner Calibrado")
             except Exception as e:
-                st.error(f"Error de calibración: {e}")
+                st.error(f"Error: {e}")
 
         cfg = Config()
         cfg.umbral_sigma = st.slider("Sensibilidad a Defectos", 2.0, 5.0, cfg.umbral_sigma, 0.1)
@@ -140,16 +170,15 @@ if opcion_menu == "🛠️ Escaneo y Acomodo":
         with open(ruta_cal, "w") as f:
             json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
 
-    # Bloque Principal de Carga (Estilo Panel)
     col_a, col_b = st.columns(2)
     with col_a:
-        st.subheader("1. Captura de la Piel")
-        fotos = st.file_uploader("Subir imagen o escaneo de superficie", accept_multiple_files=True, key="fotos")
-        demo = st.button("Usar Muestra Simulada")
+        st.subheader("1. Captura de Cuero")
+        fotos = st.file_uploader("Subir fotos del escaneo", accept_multiple_files=True, key="fotos")
+        demo = st.button("Usar Muestra de Prueba")
 
     with col_b:
-        st.subheader("2. Selección de Moldes")
-        dxfs = st.file_uploader("Subir archivos de corte (DXF)", accept_multiple_files=True, key="dxf")
+        st.subheader("2. Archivos DXF")
+        dxfs = st.file_uploader("Subir moldes (.dxf)", accept_multiple_files=True, key="dxf")
         moldes = None
         if dxfs:
             moldes = []
@@ -162,13 +191,13 @@ if opcion_menu == "🛠️ Escaneo y Acomodo":
                     f.write(a.getbuffer())
                 try:
                     pol = acomodo.molde_desde_dxf(path_a)
-                    cant = st.number_input(f"Cantidad para {a.name}", 0, 500, 0, key="c_" + a.name)
+                    cant = st.number_input(f"Cantidad {a.name}", 0, 500, 0, key="c_" + a.name)
                     moldes.append({"nombre": os.path.splitext(a.name)[0], "poligono": pol, "cantidad": cant or None})
                 except Exception as e:
                     st.error(f"Error en {a.name}: {e}")
 
     st.write("---")
-    procesar_click = st.button("Ejecutar Análisis y Acomodo", type="primary", disabled=not (fotos or demo))
+    procesar_click = st.button("Iniciar Procesamiento de Corte", type="primary", disabled=not (fotos or demo))
 
     if demo:
         carpeta_demo = os.path.join(TMP, "demo")
@@ -186,19 +215,18 @@ if opcion_menu == "🛠️ Escaneo y Acomodo":
         st.session_state["entrada"] = (carp_f, ruta_cal)
         st.session_state["ejecutar"] = True
 
-    # Procesamiento y visualización de resultados
     if st.session_state.get("ejecutar") and "entrada" in st.session_state:
         carpeta_fotos, cal_json = st.session_state["entrada"]
         salida = os.path.join(TMP, "salida")
-        estado = st.status("Procesando geometrías...", expanded=True)
+        estado = st.status("Procesando imágenes...", expanded=True)
         try:
             r = pipeline.procesar(carpeta_fotos, cal_json, salida, cfg, moldes, avisar=estado.write)
-            estado.update(label="Análisis Finalizado", state="complete", expanded=False)
+            estado.update(label="Procesamiento Exitoso", state="complete", expanded=False)
             st.session_state["resultado"] = (r["info"], salida)
             st.session_state["ejecutar"] = False
         except Exception:
             try:
-                estado.write("Procesando textura directa y detectando fallas...")
+                estado.write("Ejecutando algoritmo óptico de respaldo...")
                 os.makedirs(salida, exist_ok=True)
                 archivos = [os.path.join(carpeta_fotos, f) for f in os.listdir(carpeta_fotos) if not f.startswith(".")]
                 img = cv2.imread(archivos[0])
@@ -241,54 +269,42 @@ if opcion_menu == "🛠️ Escaneo y Acomodo":
                     "piezas": piezas_contadas, "aprovechamiento_pct": 78.5,
                     "union": {"error_medio_union_mm": 0.0}, "lista_defectos": lista_def
                 }
-                estado.update(label="Procesamiento Completado", state="complete", expanded=False)
+                estado.update(label="Análisis Finalizado", state="complete", expanded=False)
                 st.session_state["resultado"] = (info_fallback, salida)
                 st.session_state["ejecutar"] = False
             except Exception as e_fallback:
                 estado.update(label="Error", state="error")
-                st.error(f"Error técnico: {e_fallback}")
+                st.error(f"Error de procesamiento: {e_fallback}")
                 st.session_state["ejecutar"] = False
 
     if "resultado" in st.session_state:
         info, salida = st.session_state["resultado"]
-        st.write("---")
-        st.subheader("Resultados de Inspección")
+        st.subheader("Resultados del Análisis")
+        m = st.columns(4)
+        m[0].metric("Área Útil", f"{info['piel_m2']} m²")
+        m[1].metric("Defectos", info["defectos"])
+        m[2].metric("Piezas", info["piezas"])
+        m[3].metric("Rendimiento", f"{info['aprovechamiento_pct']} %")
         
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Área Útil", f"{info['piel_m2']} m²")
-        m2.metric("Defectos Detectados", info["defectos"])
-        m3.metric("Piezas Ubicadas", info["piezas"])
-        m4.metric("Aprovechamiento", f"{info['aprovechamiento_pct']} %")
-        
-        t1, t2 = st.tabs(["🖼️ Vista de Corte", "📋 Registro de Defectos"])
-        with t1:
-            st.image(os.path.join(salida, "resultado.jpg"), use_column_width=True)
-        with t2:
-            st.dataframe([{"N°": i + 1, "Categoría": d["tipo"], "Superficie (mm²)": d["area_mm2"]} for i, d in enumerate(info["lista_defectos"])], use_column_width=True)
+        t1, t2 = st.tabs(["Nidificación / Corte", "Reporte de Imperfecciones"])
+        t1.image(os.path.join(salida, "resultado.jpg"), use_column_width=True)
+        t2.dataframe([{"N°": i + 1, "Tipo": d["tipo"], "Área (mm²)": d["area_mm2"]} for i, d in enumerate(info["lista_defectos"])], use_column_width=True)
 
-# ================================================================== MÓDULO 2: MURO DE TALLER (FEED)
-elif opcion_menu == "📸 Muro de Taller (Feed)":
-    st.title("Muro Operativo y Control de Calidad")
-    st.caption("Registro fotográfico, evidencias en tiempo real e historial técnico de producción.")
-
-    with st.expander("📝 Registrar Nueva Evidencia o Incidencia", expanded=False):
+elif opcion_menu == "Muro de Taller":
+    st.title("Muro del Taller - Registro de Calidad")
+    st.caption("Historial de producción, evidencias de defectos y registro de soluciones.")
+    
+    with st.expander("➕ Nueva Publicación de Taller"):
         with st.form("nuevo_post"):
-            c1, c2 = st.columns(2)
-            with c1:
-                titulo = st.text_input("Código de Lote / Orden de Trabajo")
-                tipo_falla = st.selectbox("Categoría", ["Inspección Rutinaria", "Marcación / Venas", "Hueco / Porosidad", "Defecto de Curtido", "Molde Incompatible"])
-            with c2:
-                descripcion = st.text_area("Notas u observaciones del operario")
-                solucion = st.text_area("Acción correctiva aplicada")
+            titulo = st.text_input("Código / Lote")
+            tipo_falla = st.selectbox("Categoría", ["Normal", "Marcación / Venas", "Hueco / Porosidad", "Curtido", "Molde"])
+            descripcion = st.text_area("Observaciones")
+            solucion = st.text_area("Solución Aplicada")
             
-            st.write("---")
-            cam_col, file_col = st.columns(2)
-            with cam_col:
-                foto_camara = st.camera_input("Capturar con cámara")
-            with file_col:
-                archivo_subido = st.file_uploader("Subir archivo multimedia", type=["jpg", "png", "mp4"])
+            foto_camara = st.camera_input("Captura con cámara")
+            archivo_subido = st.file_uploader("O subir archivo", type=["jpg", "png", "mp4"])
             
-            if st.form_submit_button("Guardar en Historial", type="primary"):
+            if st.form_submit_button("Publicar en Historial", type="primary"):
                 media_guardada = ""
                 if foto_camara:
                     bytes_data = foto_camara.getvalue()
@@ -307,10 +323,9 @@ elif opcion_menu == "📸 Muro de Taller (Feed)":
                               ("Operario Taller", titulo, descripcion, tipo_falla, solucion, datetime.now().strftime("%d/%m/%Y %H:%M"), media_guardada))
                     conn.commit()
                     conn.close()
-                    st.success("Registro publicado correctamente.")
+                    st.success("Publicado")
                     st.rerun()
 
-    # Despliegue de tarjetas elegantes
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path FROM feed ORDER BY id DESC")
@@ -319,39 +334,27 @@ elif opcion_menu == "📸 Muro de Taller (Feed)":
 
     for p in posts:
         usr, tit, desc, falla, sol, fecha, media = p
-        st.markdown(f"""
-        <div class="custom-card">
-            <small style="color: #64748B;">{usr} • {fecha}</small>
-            <h3 style="margin-top: 4px; margin-bottom: 12px;">{tit}</h3>
-            <span style="background-color: #E2E8F0; color: #334155; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{falla}</span>
-            <p style="margin-top: 12px; color: #334155;">{desc}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
+        st.markdown(f"### {tit} · <small style='color:#8b949e;'>{fecha}</small>", unsafe_allow_html=True)
+        st.write(f"**Categoría:** {falla} | **Notas:** {desc}")
         if media and os.path.exists(media):
             if media.endswith(".mp4"):
                 st.video(media)
             else:
-                st.image(media, width=450)
-        
+                st.image(media, width=400)
         if sol:
-            st.info(f"💡 **Solución registrada:** {sol}")
-        st.write("---")
+            st.info(f"Solución: {sol}")
+        st.divider()
 
-# ================================================================== MÓDULO 3: CATÁLOGO DE MOLDES
-elif opcion_menu == "📦 Catálogo de Moldes":
-    st.title("Inventario de Moldes Digitales")
-    st.caption("Repositorio centralizado de patrones de corte en formato DXF.")
+elif opcion_menu == "Catálogo de Moldes":
+    st.title("Catálogo Digital de Moldes")
+    st.caption("Base de datos de patrones vectoriales DXF.")
 
-    with st.expander("📥 Añadir Molde al Inventario", expanded=False):
+    with st.expander("📥 Subir Nuevo Molde"):
         with st.form("nuevo_molde"):
-            c1, c2 = st.columns(2)
-            with c1:
-                nombre_m = st.text_input("Nombre de la Pieza / Modelo")
-                cliente_m = st.text_input("Cliente / Marca")
-            with c2:
-                dims_m = st.text_input("Dimensiones Estimadas (mm)", "200 x 150")
-                archivo_dxf = st.file_uploader("Archivo DXF", key="dxf_inv")
+            nombre_m = st.text_input("Nombre de la Pieza")
+            cliente_m = st.text_input("Cliente")
+            dims_m = st.text_input("Dimensiones (mm)", "200 x 150")
+            archivo_dxf = st.file_uploader("Archivo DXF", key="dxf_inv")
             
             if st.form_submit_button("Guardar en Catálogo", type="primary") and archivo_dxf:
                 path_dxf = os.path.join(TMP, archivo_dxf.name)
@@ -364,7 +367,7 @@ elif opcion_menu == "📦 Catálogo de Moldes":
                           (nombre_m, cliente_m, dims_m, datetime.now().strftime("%d/%m/%Y"), path_dxf))
                 conn.commit()
                 conn.close()
-                st.success(f"Molde '{nombre_m}' guardado en la base de datos.")
+                st.success("Molde Guardado")
                 st.rerun()
 
     conn = sqlite3.connect(DB_PATH)
@@ -377,36 +380,14 @@ elif opcion_menu == "📦 Catálogo de Moldes":
         cols = st.columns(3)
         for idx, m in enumerate(m_list):
             with cols[idx % 3]:
-                st.markdown(f"""
-                <div class="custom-card">
-                    <h4>📐 {m[0]}</h4>
-                    <p style="font-size: 13px; color: #64748B; margin-bottom: 4px;">Cliente: <b>{m[1]}</b></p>
-                    <p style="font-size: 13px; color: #64748B;">Medidas: <b>{m[2]}</b></p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"#### 📐 {m[0]}")
+                st.write(f"Cliente: **{m[1]}**")
+                st.write(f"Dimensiones: **{m[2]}**")
                 if m[4] and os.path.exists(m[4]):
                     st.download_button("Descargar DXF", open(m[4], "rb"), os.basename(m[4]), key=f"btn_{idx}")
     else:
-        st.info("No hay moldes registrados en el catálogo.")
+        st.info("Sin moldes registrados.")
 
-# ================================================================== MÓDULO 4: BIBLIOTECA TÉCNICA
-elif opcion_menu == "🎥 Biblioteca Técnica":
-    st.title("Capacitación y Guías de Uso")
-    st.caption("Recursos audiovisuales interactivos para operarios y clientes.")
-
-    v1, v2 = st.columns(2)
-    with v1:
-        st.markdown("""
-        <div class="custom-card">
-            <h3>📹 Protocolo de Escaneo de Pieles</h3>
-            <p style="color: #64748B;">Instrucciones para colocación de luz y calibración previa.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with v2:
-        st.markdown("""
-        <div class="custom-card">
-            <h3>📹 Verificación de Tolerancias DXF</h3>
-            <p style="color: #64748B;">Guía para asegurar la precisión dimensional en el corte.</p>
-        </div>
-        """, unsafe_allow_html=True)
+elif opcion_menu == "Biblioteca Técnica":
+    st.title("Capacitación y Guías Técnicas")
+    st.write("Módulo reservado para tutoriales en video e instructivos para operarios.")
