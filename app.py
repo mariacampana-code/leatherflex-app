@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Plataforma Elegante"""
+"""Leather-Flex 3D - Plataforma Elegante Limpia"""
 import os
 import json
 import sqlite3
@@ -24,7 +24,7 @@ st.set_page_config(
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 
-# ------------------------------------------------------------------ CSS Personalizado Elegante (Café / Semitransparente)
+# ------------------------------------------------------------------ CSS Personalizado Elegante
 st.markdown("""
 <style>
     /* Estilo general con tono café elegancia #ab9680 */
@@ -118,7 +118,7 @@ def init_db():
 
 init_db()
 
-# ------------------------------------------------------------------ Encabezado Lateral Limpio
+# ------------------------------------------------------------------ Encabezado Lateral Limpio con 5 Módulos
 with st.sidebar:
     st.markdown("""
         <div class="brand-container">
@@ -128,43 +128,19 @@ with st.sidebar:
     
     opcion_menu = st.radio(
         "Navegacion",
-        ["Escaneo y Acomodo", "Muro de Taller", "Catálogo de Moldes", "Biblioteca Técnica"],
+        ["Escaneo y Acomodo", "Calibración de Escáner", "Muro de Taller", "Catálogo de Moldes", "Biblioteca Técnica"],
         label_visibility="collapsed"
     )
+
+ruta_cal = os.path.join(TMP, "calib.json")
+if not os.path.exists(ruta_cal):
+    with open(ruta_cal, "w") as f:
+        json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
 
 # ================================================================== MÓDULOS
 if opcion_menu == "Escaneo y Acomodo":
     st.title("Escaneo y Acomodo de Moldes")
     st.caption("Inspección óptica de imperfecciones y cálculo de nidificación (Nesting).")
-
-    with st.sidebar:
-        st.write("---")
-        st.subheader("Parámetros de Calibración")
-        ruta_tab = os.path.join(TMP, "tablero_para_imprimir.png")
-        if not os.path.exists(ruta_tab):
-            calibracion.tablero_para_imprimir(ruta_tab)
-        st.download_button("Descargar Tablero Calibración", open(ruta_tab, "rb"), "tablero_calibracion.png", "image/png")
-        
-        f_tab = st.file_uploader("Foto del tablero", key="tab")
-        f_bla = st.file_uploader("Hoja blanca (opcional)", key="bla")
-        ruta_cal = os.path.join(TMP, "calib.json")
-        
-        if f_tab and st.button("Calibrar Escáner"):
-            try:
-                cal = calibracion.calibrar_tablero(cv2.imdecode(np.frombuffer(f_tab.getbuffer(), np.uint8), cv2.IMREAD_COLOR))
-                gan = calibracion.campo_plano(cv2.imdecode(np.frombuffer(f_bla.getbuffer(), np.uint8), cv2.IMREAD_COLOR)) if f_bla else None
-                calibracion.guardar(cal, gan, ruta_cal)
-                st.session_state["cal"] = cal
-                st.success("Escáner Calibrado")
-            except Exception as e:
-                st.error(f"Error: {e}")
-
-        cfg = Config()
-        cfg.umbral_sigma = st.slider("Sensibilidad a Defectos", 2.0, 5.0, cfg.umbral_sigma, 0.1)
-
-    if not os.path.exists(ruta_cal):
-        with open(ruta_cal, "w") as f:
-            json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -194,6 +170,8 @@ if opcion_menu == "Escaneo y Acomodo":
 
     st.write("---")
     procesar_click = st.button("Iniciar Procesamiento de Corte", type="primary", disabled=not (fotos or demo))
+
+    cfg = Config()
 
     if demo:
         carpeta_demo = os.path.join(TMP, "demo")
@@ -285,6 +263,38 @@ if opcion_menu == "Escaneo y Acomodo":
         t1, t2 = st.tabs(["Nidificación / Corte", "Reporte de Imperfecciones"])
         t1.image(os.path.join(salida, "resultado.jpg"), use_column_width=True)
         t2.dataframe([{"N°": i + 1, "Tipo": d["tipo"], "Área (mm²)": d["area_mm2"]} for i, d in enumerate(info["lista_defectos"])], use_column_width=True)
+
+# ================================================================== MÓDULO 2: CALIBRACIÓN (NUEVO PUNTO SEPARADO)
+elif opcion_menu == "Calibración de Escáner":
+    st.title("Calibración del Sistema Óptico")
+    st.caption("Ajuste de parámetros de cámara, escala de milímetros por píxel y corrección de plano.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("1. Tablero de Referencia")
+        ruta_tab = os.path.join(TMP, "tablero_para_imprimir.png")
+        if not os.path.exists(ruta_tab):
+            calibracion.tablero_para_imprimir(ruta_tab)
+        st.download_button("📥 Descargar Tablero Calibración", open(ruta_tab, "rb"), "tablero_calibracion.png", "image/png")
+        
+        f_tab = st.file_uploader("Subir foto del tablero en mesa", key="tab")
+        f_bla = st.file_uploader("Hoja blanca para compensación (opcional)", key="bla")
+
+    with col2:
+        st.subheader("2. Ajustes de Sensibilidad")
+        cfg = Config()
+        cfg.umbral_sigma = st.slider("Sensibilidad a Defectos (Sigma)", 2.0, 5.0, cfg.umbral_sigma, 0.1)
+
+    st.write("---")
+    if f_tab and st.button("Guardar y Calibrar Escáner", type="primary"):
+        try:
+            cal = calibracion.calibrar_tablero(cv2.imdecode(np.frombuffer(f_tab.getbuffer(), np.uint8), cv2.IMREAD_COLOR))
+            gan = calibracion.campo_plano(cv2.imdecode(np.frombuffer(f_bla.getbuffer(), np.uint8), cv2.IMREAD_COLOR)) if f_bla else None
+            calibracion.guardar(cal, gan, ruta_cal)
+            st.session_state["cal"] = cal
+            st.success(" Escáner Calibrado y configurado correctamente.")
+        except Exception as e:
+            st.error(f"Error durante la calibración: {e}")
 
 elif opcion_menu == "Muro de Taller":
     st.title("Muro del Taller - Registro de Calidad")
