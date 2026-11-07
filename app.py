@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Plataforma Completa con Descarga Robusta de DXF"""
+"""Leather-Flex 3D - Captura Directa de Moldes Físicos y DXF"""
 import os
 import json
 import sqlite3
@@ -103,6 +103,28 @@ def crear_dxf_demo(puntos, nombre_archivo):
     contenido = generar_contenido_dxf(puntos)
     with open(nombre_archivo, "w") as f:
         f.write(contenido)
+
+def extraer_puntos_desde_foto(bytes_imagen):
+    """Detecta la silueta del molde de cartón/papel usando OpenCV"""
+    arr = np.frombuffer(bytes_imagen, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    h, w, _ = img.shape
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (7, 7), 0)
+    _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    
+    cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return [(0,0), (200,0), (180,120), (20,120)], "200 x 120"
+        
+    c_max = max(cnts, key=cv2.contourArea)
+    epsilon = 0.01 * cv2.arcLength(c_max, True)
+    approx = cv2.approxPolyDP(c_max, epsilon, True)
+    
+    pts = [(int(pt[0][0]), int(pt[0][1])) for pt in approx]
+    x, y, bw, bh = cv2.boundingRect(c_max)
+    dims_str = f"{int(bw)} x {int(bh)}"
+    return pts, dims_str
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -426,16 +448,48 @@ elif opcion_menu == "Calibración de Escáner":
 
 elif opcion_menu == "Catálogo de Moldes":
     st.title("Catálogo Digital de Moldes")
-    st.caption("Base de datos de patrones vectoriales DXF.")
+    st.caption("Base de datos de patrones vectoriales y digitalizaciones físicas.")
 
-    with st.expander("📥 Subir Nuevo Molde"):
-        with st.form("nuevo_molde"):
+    tab_auto, tab_dxf = st.tabs(["📷 Tomar Foto a Molde Físico (Cartón/Papel)", "📄 Subir Archivo DXF (AutoCAD)"])
+    
+    with tab_auto:
+        st.write("### Digitalización Rápida en Taller")
+        st.caption("Coloca el molde de cartón o papel sobre la mesa y tómale una foto limpia desde arriba.")
+        
+        foto_molde = st.file_uploader("Tomar foto al molde de cartón", type=["jpg", "png", "jpeg"], key="foto_m_fisico")
+        with st.form("form_foto_molde"):
+            nom_f = st.text_input("Nombre de la Pieza", placeholder="Ej. Capellada M-101")
+            cli_f = st.text_input("Cliente", placeholder="Ej. Taller Central")
+            
+            if st.form_submit_button("Digitalizar y Guardar en Catálogo", type="primary"):
+                if not foto_molde or not nom_f:
+                    st.warning("Por favor toma la foto y escribe el nombre de la pieza.")
+                else:
+                    pts, dims_calc = extraer_puntos_desde_foto(foto_molde.getbuffer())
+                    nombre_archivo_dxf = f"{nom_f.replace(' ', '_')}.dxf"
+                    ruta_guardada = os.path.join(TMP, nombre_archivo_dxf)
+                    
+                    contenido_dxf = generar_contenido_dxf(pts)
+                    with open(ruta_guardada, "w") as f:
+                        f.write(contenido_dxf)
+
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    c.execute("INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf) VALUES (?, ?, ?, ?, ?)",
+                              (nom_f, cli_f or "Interno", dims_calc, datetime.now().strftime("%d/%m/%Y"), ruta_guardada))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"¡Molde '{nom_f}' digitalizado y guardado con éxito!")
+                    st.rerun()
+
+    with tab_dxf:
+        with st.form("nuevo_molde_dxf"):
             nombre_m = st.text_input("Nombre de la Pieza")
             cliente_m = st.text_input("Cliente")
             dims_m = st.text_input("Dimensiones (mm)", "200 x 150")
             archivo_dxf = st.file_uploader("Archivo DXF", key="dxf_inv")
             
-            if st.form_submit_button("Guardar en Catálogo", type="primary") and archivo_dxf:
+            if st.form_submit_button("Guardar DXF en Catálogo", type="primary") and archivo_dxf:
                 path_dxf = os.path.join(TMP, archivo_dxf.name)
                 with open(path_dxf, "wb") as f:
                     f.write(archivo_dxf.getbuffer())
@@ -446,8 +500,10 @@ elif opcion_menu == "Catálogo de Moldes":
                           (nombre_m, cliente_m, dims_m, datetime.now().strftime("%d/%m/%Y"), path_dxf))
                 conn.commit()
                 conn.close()
-                st.success("Molde Guardado")
+                st.success("Molde DXF Guardado")
                 st.rerun()
+
+    st.write("---")
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -463,13 +519,11 @@ elif opcion_menu == "Catálogo de Moldes":
                 st.write(f"Cliente: **{m[1]}**")
                 st.write(f"Dimensiones: **{m[2]}**")
                 
-                # Manejo seguro de lectura de archivos DXF precargados
                 contenido_dxf = ""
                 if m[4] and os.path.exists(m[4]):
                     with open(m[4], "r") as f_dxf:
                         contenido_dxf = f_dxf.read()
                 else:
-                    # Generación al vuelo en memoria si es un registro precargado en la nube
                     pts_base = [(0,0), (200,0), (180,120), (20,120)]
                     contenido_dxf = generar_contenido_dxf(pts_base)
                 
