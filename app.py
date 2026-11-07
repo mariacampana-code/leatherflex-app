@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Sistema Conectado con Gestión de Borrado"""
+"""Leather-Flex 3D - Plataforma Completa con Precarga Autogestionada"""
 import os
 import json
 import sqlite3
@@ -24,7 +24,7 @@ st.set_page_config(
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 
-# ------------------------------------------------------------------ CSS Personalizado Elegante
+# ------------------------------------------------------------------ CSS Personalizado
 st.markdown("""
 <style>
     .stApp {
@@ -86,6 +86,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def crear_dxf_demo(puntos, nombre_archivo):
+    dxf_content = [
+        "0", "SECTION", "2", "HEADER", "0", "ENDSEC",
+        "0", "SECTION", "2", "TABLES", "0", "ENDSEC",
+        "0", "SECTION", "2", "BLOCKS", "0", "ENDSEC",
+        "0", "SECTION", "2", "ENTITIES",
+        "0", "POLYLINE", "8", "MOLDES", "66", "1", "70", "1"
+    ]
+    for x, y in puntos:
+        dxf_content.extend(["0", "VERTEX", "8", "MOLDES", "10", str(x), "20", str(y), "30", "0.0"])
+    dxf_content.extend(["0", "SEQEND", "0", "ENDSEC", "0", "EOF"])
+    
+    with open(nombre_archivo, "w") as f:
+        f.write("\n".join(dxf_content))
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -96,6 +110,26 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS feed 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, titulo TEXT, 
                   descripcion TEXT, tipo_falla TEXT, solucion TEXT, fecha TEXT, media_path TEXT)''')
+    
+    # Verificar si está vacío el catálogo y precargar automáticamente
+    c.execute("SELECT COUNT(*) FROM moldes")
+    count = c.fetchone()[0]
+    if count == 0:
+        carp_dxf = os.path.join(TMP, "moldes_precargados")
+        os.makedirs(carp_dxf, exist_ok=True)
+        moldes_demo = [
+            ("Capellada Zapato Oxford", "Calzados Lujo", "240 x 160", [(0,0), (240,0), (220,160), (20,160)]),
+            ("Plantilla Ergonómica Talla 42", "Industrial Boot", "280 x 95", [(0,20), (280,0), (270,95), (10,80)]),
+            ("Cuerpo Bolso Mano", "Moda & Cuero", "350 x 250", [(0,0), (350,0), (350,250), (0,250)]),
+            ("Tirante Mochila Cuero", "Artisan Leather", "450 x 45", [(0,0), (450,0), (440,45), (10,45)]),
+            ("Bolsillo Frontal Billetera", "Personalizado", "110 x 80", [(0,0), (110,0), (100,80), (10,80)])
+        ]
+        for nom, cli, dim, pts in moldes_demo:
+            ruta = os.path.join(carp_dxf, f"{nom.replace(' ', '_')}.dxf")
+            crear_dxf_demo(pts, ruta)
+            c.execute("INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf) VALUES (?, ?, ?, ?, ?)",
+                      (nom, cli, dim, datetime.now().strftime("%d/%m/%Y"), ruta))
+            
     conn.commit()
     conn.close()
 
@@ -162,7 +196,6 @@ if opcion_menu == "Captura del Cuero":
 
     st.write("---")
 
-    # Mostrar publicaciones pasadas con opción de eliminación
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, usuario, titulo, fecha, media_path FROM feed ORDER BY id DESC")
@@ -191,21 +224,18 @@ if opcion_menu == "Captura del Cuero":
                 col_del, _ = st.columns([1, 3])
                 with col_del:
                     if st.button("Eliminar", key=f"del_{post_id}"):
-                        # 1. Borrar de la base de datos
                         conn = sqlite3.connect(DB_PATH)
                         c = conn.cursor()
                         c.execute("DELETE FROM feed WHERE id = ?", (post_id,))
                         conn.commit()
                         conn.close()
 
-                        # 2. Borrar archivo físico del disco si existe
                         if media and os.path.exists(media):
                             try:
                                 os.remove(media)
                             except Exception:
                                 pass
 
-                        # 3. Limpiar memoria conectada si era la última foto activa
                         if st.session_state.get("ultima_captura_cuero") == media:
                             st.session_state["ultima_captura_cuero"] = None
 
