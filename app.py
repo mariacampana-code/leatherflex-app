@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Experiencia Cámara Nativa Móvil"""
+"""Leather-Flex 3D - Sistema Conectado de Inspección y Corte"""
 import os
 import json
 import sqlite3
@@ -24,7 +24,7 @@ st.set_page_config(
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 
-# ------------------------------------------------------------------ CSS Personalizado
+# ------------------------------------------------------------------ CSS Personalizado Elegante
 st.markdown("""
 <style>
     .stApp {
@@ -111,7 +111,7 @@ with st.sidebar:
     
     opcion_menu = st.radio(
         "Navegacion",
-        ["Muro de Taller", "Escaneo y Acomodo", "Calibración de Escáner", "Catálogo de Moldes", "Biblioteca Técnica"],
+        ["Captura del Cuero", "Acomodo de Moldes", "Calibración de Escáner", "Catálogo de Moldes", "Biblioteca Técnica"],
         label_visibility="collapsed"
     )
 
@@ -120,50 +120,51 @@ if not os.path.exists(ruta_cal):
     with open(ruta_cal, "w") as f:
         json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
 
-# ================================================================== MÓDULO: MURO DE TALLER
-if opcion_menu == "Muro de Taller":
-    st.title("Muro de Taller")
-    st.caption("Registro de incidencias y evidencias de producción.")
+# ================================================================== MÓDULO 1: CAPTURA DEL CUERO
+if opcion_menu == "Captura del Cuero":
+    st.title("Captura del Cuero")
+    st.caption("Registro de evidencia en vivo (cámara/galería) e historial del taller.")
 
-    @st.dialog("➕ Nueva Evidencia de Taller")
+    @st.dialog("➕ Capturar Nueva Piel / Evidencia")
     def modal_crear_post():
-        st.write("### Seleccionar evidencia:")
+        st.write("### Seleccionar foto o video del cuero:")
         
-        # Subidor directo que activa la cámara nativa del teléfono (iOS / Android)
         archivo_subido = st.file_uploader(
             "Toma una foto/video con la cámara o elige de tu galería", 
             type=["jpg", "png", "jpeg", "mp4", "mov"],
-            help="Al presionar se abrirá la cámara de tu celular"
+            help="Al presionar se abrirá la cámara nativa de tu dispositivo"
         )
 
-        nota_rapida = st.text_input("Nota breve (Opcional)", placeholder="Ej. Lote A-102 / Marca en piel")
+        nota_rapida = st.text_input("Identificador / Lote (Opcional)", placeholder="Ej. Lote Cuero Vacuno A-1")
         
-        if st.button("Publicar en el Muro", type="primary", use_container_width=True):
+        if st.button("Guardar y Enviar a Acomodo de Moldes", type="primary", use_container_width=True):
             if archivo_subido is None:
-                st.warning("Por favor captura o selecciona una foto/video.")
+                st.warning("Por favor toma una foto/video o elige un archivo.")
             else:
-                ext = os.path.splitext(archivo_subido.name)[1]
-                if not ext:
-                    ext = ".jpg"
-                media_guardada = os.path.join(TMP, f"post_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}")
-                with open(media_guardada, "wb") as f:
+                ext = os.path.splitext(archivo_subido.name)[1] or ".jpg"
+                ruta_archivo_guardado = os.path.join(TMP, f"captura_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}")
+                with open(ruta_archivo_guardado, "wb") as f:
                     f.write(archivo_subido.getbuffer())
 
+                # 1. Guardar en la base de datos (Historial)
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
                 c.execute("INSERT INTO feed (usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                          ("Operario Taller", nota_rapida or "Registro de Taller", "", "Registro", "", datetime.now().strftime("%d/%m/%Y %H:%M"), media_guardada))
+                          ("Operario Taller", nota_rapida or "Captura de Cuero", "", "Piel", "", datetime.now().strftime("%d/%m/%Y %H:%M"), ruta_archivo_guardado))
                 conn.commit()
                 conn.close()
-                st.success("¡Publicado en el muro!")
+
+                # 2. CONEXIÓN DIRECTA CON ACOMODO DE MOLDES (Guardar en Session State)
+                st.session_state["ultima_captura_cuero"] = ruta_archivo_guardado
+                st.success("¡Captura guardada! Foto enviada automáticamente al módulo 'Acomodo de Moldes'.")
                 st.rerun()
 
-    if st.button("➕  Agregar foto / video a la sesión", type="primary", use_container_width=True):
+    if st.button("➕  Tomar foto / video del cuero", type="primary", use_container_width=True):
         modal_crear_post()
 
     st.write("---")
 
-    # Mostrar publicaciones
+    # Mostrar publicaciones pasadas
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT usuario, titulo, fecha, media_path FROM feed ORDER BY id DESC")
@@ -171,7 +172,7 @@ if opcion_menu == "Muro de Taller":
     conn.close()
 
     if not posts:
-        st.info("No hay evidencia registrada. Presiona ➕ para tomar la primera foto.")
+        st.info("No hay capturas registradas. Presiona el botón ➕ de arriba para tomar la primera foto.")
     else:
         for p in posts:
             usr, tit, fecha, media = p
@@ -190,19 +191,29 @@ if opcion_menu == "Muro de Taller":
                         st.image(media, use_column_width=True)
                 st.divider()
 
-# ================================================================== MÓDULOS RESTANTES
-elif opcion_menu == "Escaneo y Acomodo":
-    st.title("Escaneo y Acomodo de Moldes")
-    st.caption("Inspección óptica de imperfecciones y cálculo de nidificación (Nesting).")
+# ================================================================== MÓDULO 2: ACOMODO DE MOLDES (CONECTADO)
+elif opcion_menu == "Acomodo de Moldes":
+    st.title("Acomodo de Moldes")
+    st.caption("Inspección de imperfecciones en la piel capturada y cálculo de nidificación (Nesting).")
 
     col_a, col_b = st.columns(2)
     with col_a:
-        st.subheader("1. Captura de Cuero")
-        fotos = st.file_uploader("Subir fotos del escaneo", accept_multiple_files=True, key="fotos")
-        demo = st.button("Usar Muestra de Prueba")
+        st.subheader("1. Imagen de Piel Activa")
+        
+        # VERIFICACIÓN DE CONEXIÓN AUTOMÁTICA
+        foto_conectada = st.session_state.get("ultima_captura_cuero")
+        
+        if foto_conectada and os.path.exists(foto_conectada):
+            st.success("⚡ Imagen obtenida directamente de 'Captura del Cuero'")
+            st.image(foto_conectada, caption="Piel seleccionada para procesamiento", use_column_width=True)
+        else:
+            st.info("No hay una foto reciente capturada. Puedes tomar una en 'Captura del Cuero' o subir una imagen manual aquí:")
+
+        fotos_manuales = st.file_uploader("Subir otra foto manualmente", accept_multiple_files=True, key="fotos")
+        demo = st.button("Usar Muestra de Prueba (Demo)")
 
     with col_b:
-        st.subheader("2. Archivos DXF")
+        st.subheader("2. Archivos DXF (Moldes)")
         dxfs = st.file_uploader("Subir moldes (.dxf)", accept_multiple_files=True, key="dxf")
         moldes = None
         if dxfs:
@@ -222,7 +233,10 @@ elif opcion_menu == "Escaneo y Acomodo":
                     st.error(f"Error en {a.name}: {e}")
 
     st.write("---")
-    procesar_click = st.button("Iniciar Procesamiento de Corte", type="primary", disabled=not (fotos or demo))
+    
+    # El botón se habilita si hay foto conectada por sesión, fotos manuales o demo
+    tiene_imagen = bool(foto_conectada or fotos_manuales or demo)
+    procesar_click = st.button("Iniciar Procesamiento y Acomodo de Corte", type="primary", disabled=not tiene_imagen)
 
     cfg = Config()
 
@@ -232,13 +246,20 @@ elif opcion_menu == "Escaneo y Acomodo":
         simulador.generar(carpeta_demo)
         st.session_state["entrada"] = (os.path.join(carpeta_demo, "fotos"), os.path.join(carpeta_demo, "calib.json"))
         st.session_state["ejecutar"] = True
-    elif procesar_click and fotos:
+    elif procesar_click:
         carp_f = os.path.join(TMP, "fotos")
         shutil.rmtree(carp_f, ignore_errors=True)
         os.makedirs(carp_f)
-        for a in fotos:
-            with open(os.path.join(carp_f, a.name), "wb") as f:
-                f.write(a.getbuffer())
+        
+        # Usar la foto conectada o las manuales
+        if foto_conectada and not fotos_manuales:
+            dest = os.path.join(carp_f, os.path.basename(foto_conectada))
+            shutil.copy(foto_conectada, dest)
+        elif fotos_manuales:
+            for a in fotos_manuales:
+                with open(os.path.join(carp_f, a.name), "wb") as f:
+                    f.write(a.getbuffer())
+                    
         st.session_state["entrada"] = (carp_f, ruta_cal)
         st.session_state["ejecutar"] = True
 
@@ -317,6 +338,7 @@ elif opcion_menu == "Escaneo y Acomodo":
         t1.image(os.path.join(salida, "resultado.jpg"), use_column_width=True)
         t2.dataframe([{"N°": i + 1, "Tipo": d["tipo"], "Área (mm²)": d["area_mm2"]} for i, d in enumerate(info["lista_defectos"])], use_column_width=True)
 
+# ================================================================== MÓDULOS SECUNDARIOS
 elif opcion_menu == "Calibración de Escáner":
     st.title("Calibración del Sistema Óptico")
     st.caption("Ajuste de parámetros de cámara, escala de milímetros por píxel y corrección de plano.")
