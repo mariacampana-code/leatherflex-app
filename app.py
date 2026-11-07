@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Captura Directa de Moldes Físicos y DXF"""
+"""Leather-Flex 3D - Catálogo Separado por Origen (Foto vs DXF)"""
 import os
 import json
 import sqlite3
@@ -130,11 +130,17 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS moldes 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, cliente TEXT, 
-                  dimensiones TEXT, fecha TEXT, archivo_dxf TEXT)''')
+                  dimensiones TEXT, fecha TEXT, archivo_dxf TEXT, origen TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS feed 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, titulo TEXT, 
                   descripcion TEXT, tipo_falla TEXT, solucion TEXT, fecha TEXT, media_path TEXT)''')
     
+    # Migración suave por si no existe la columna origen
+    try:
+        c.execute("ALTER TABLE moldes ADD COLUMN origen TEXT")
+    except Exception:
+        pass
+
     c.execute("SELECT COUNT(*) FROM moldes")
     count = c.fetchone()[0]
     if count == 0:
@@ -146,8 +152,8 @@ def init_db():
         for nom, cli, dim, pts in moldes_demo:
             ruta = os.path.join(carp_dxf, f"{nom.replace(' ', '_')}.dxf")
             crear_dxf_demo(pts, ruta)
-            c.execute("INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf) VALUES (?, ?, ?, ?, ?)",
-                      (nom, cli, dim, datetime.now().strftime("%d/%m/%Y"), ruta))
+            c.execute("INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf, origen) VALUES (?, ?, ?, ?, ?, ?)",
+                      (nom, cli, dim, datetime.now().strftime("%d/%m/%Y"), ruta, "dxf"))
             
     conn.commit()
     conn.close()
@@ -461,21 +467,37 @@ elif opcion_menu == "Catálogo de Moldes":
                     st.warning("Por favor toma la foto y escribe el nombre de la pieza.")
                 else:
                     pts, dims_calc = extraer_puntos_desde_foto(foto_molde.getbuffer())
-                    nombre_archivo_dxf = f"{nom_f.replace(' ', '_')}.dxf"
-                    ruta_guardada = os.path.join(TMP, nombre_archivo_dxf)
-                    
-                    contenido_dxf = generar_contenido_dxf(pts)
-                    with open(ruta_guardada, "w") as f:
-                        f.write(contenido_dxf)
+                    nombre_archivo_img = f"foto_{nom_f.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                    ruta_guardada = os.path.join(TMP, nombre_archivo_img)
+                    with open(ruta_guardada, "wb") as f:
+                        f.write(foto_molde.getbuffer())
 
                     conn = sqlite3.connect(DB_PATH)
                     c = conn.cursor()
-                    c.execute("INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf) VALUES (?, ?, ?, ?, ?)",
-                              (nom_f, cli_f or "Interno", dims_calc, datetime.now().strftime("%d/%m/%Y"), ruta_guardada))
+                    c.execute("INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf, origen) VALUES (?, ?, ?, ?, ?, ?)",
+                              (nom_f, cli_f or "Interno", dims_calc, datetime.now().strftime("%d/%m/%Y"), ruta_guardada, "foto"))
                     conn.commit()
                     conn.close()
                     st.success(f"Molde '{nom_f}' digitalizado y guardado con éxito.")
                     st.rerun()
+
+        st.write("---")
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT nombre, cliente, dimensiones, fecha, archivo_dxf FROM moldes WHERE origen = 'foto' ORDER BY id DESC")
+        m_fotos = c.fetchall()
+        conn.close()
+
+        if m_fotos:
+            cols_f = st.columns(3)
+            for idx, m in enumerate(m_fotos):
+                with cols_f[idx % 3]:
+                    st.markdown(f"#### {m[0]}")
+                    st.write(f"Cliente: **{m[1]}**")
+                    st.write(f"Dimensiones: **{m[2]}**")
+                    st.caption("Origen: Digitalizado por Fotografía")
+        else:
+            st.info("Sin fotos de moldes registradas. Toma tu primera foto en el formulario de arriba.")
 
     with tab_dxf:
         with st.form("nuevo_molde_dxf"):
@@ -491,46 +513,45 @@ elif opcion_menu == "Catálogo de Moldes":
                 
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
-                c.execute("INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf) VALUES (?, ?, ?, ?, ?)",
-                          (nombre_m, cliente_m, dims_m, datetime.now().strftime("%d/%m/%Y"), path_dxf))
+                c.execute("INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf, origen) VALUES (?, ?, ?, ?, ?, ?)",
+                          (nombre_m, cliente_m, dims_m, datetime.now().strftime("%d/%m/%Y"), path_dxf, "dxf"))
                 conn.commit()
                 conn.close()
                 st.success("Molde DXF Guardado")
                 st.rerun()
 
-    st.write("---")
+        st.write("---")
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT nombre, cliente, dimensiones, fecha, archivo_dxf FROM moldes WHERE origen IS NULL OR origen = 'dxf' ORDER BY id DESC")
+        m_dxfs = c.fetchall()
+        conn.close()
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT nombre, cliente, dimensiones, fecha, archivo_dxf FROM moldes ORDER BY id DESC")
-    m_list = c.fetchall()
-    conn.close()
-
-    if m_list:
-        cols = st.columns(3)
-        for idx, m in enumerate(m_list):
-            with cols[idx % 3]:
-                st.markdown(f"#### {m[0]}")
-                st.write(f"Cliente: **{m[1]}**")
-                st.write(f"Dimensiones: **{m[2]}**")
-                
-                contenido_dxf = ""
-                if m[4] and os.path.exists(m[4]):
-                    with open(m[4], "r") as f_dxf:
-                        contenido_dxf = f_dxf.read()
-                else:
-                    pts_base = [(0,0), (200,0), (180,120), (20,120)]
-                    contenido_dxf = generar_contenido_dxf(pts_base)
-                
-                st.download_button(
-                    "Descargar DXF", 
-                    data=contenido_dxf, 
-                    file_name=f"{m[0].replace(' ', '_')}.dxf", 
-                    mime="application/dxf", 
-                    key=f"btn_{idx}"
-                )
-    else:
-        st.info("Sin moldes registrados.")
+        if m_dxfs:
+            cols_d = st.columns(3)
+            for idx, m in enumerate(m_dxfs):
+                with cols_d[idx % 3]:
+                    st.markdown(f"#### {m[0]}")
+                    st.write(f"Cliente: **{m[1]}**")
+                    st.write(f"Dimensiones: **{m[2]}**")
+                    
+                    contenido_dxf = ""
+                    if m[4] and os.path.exists(m[4]):
+                        with open(m[4], "r") as f_dxf:
+                            contenido_dxf = f_dxf.read()
+                    else:
+                        pts_base = [(0,0), (200,0), (180,120), (20,120)]
+                        contenido_dxf = generar_contenido_dxf(pts_base)
+                    
+                    st.download_button(
+                        "Descargar DXF", 
+                        data=contenido_dxf, 
+                        file_name=f"{m[0].replace(' ', '_')}.dxf", 
+                        mime="application/dxf", 
+                        key=f"btn_dxf_{idx}"
+                    )
+        else:
+            st.info("Sin archivos DXF registrados.")
 
 elif opcion_menu == "Biblioteca Técnica":
     st.title("Capacitación y Guías Técnicas")
