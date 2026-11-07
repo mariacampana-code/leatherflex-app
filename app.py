@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Sistema Conectado de Inspección y Corte"""
+"""Leather-Flex 3D - Sistema Conectado con Gestión de Borrado"""
 import os
 import json
 import sqlite3
@@ -79,7 +79,7 @@ st.markdown("""
         background: rgba(255, 255, 255, 0.85);
         border-radius: 16px;
         padding: 18px;
-        margin-bottom: 20px;
+        margin-bottom: 12px;
         border: 1px solid rgba(255, 255, 255, 0.9);
         box-shadow: 0 8px 20px rgba(0,0,0,0.05);
     }
@@ -146,7 +146,6 @@ if opcion_menu == "Captura del Cuero":
                 with open(ruta_archivo_guardado, "wb") as f:
                     f.write(archivo_subido.getbuffer())
 
-                # 1. Guardar en la base de datos (Historial)
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
                 c.execute("INSERT INTO feed (usuario, titulo, descripcion, tipo_falla, solucion, fecha, media_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -154,9 +153,8 @@ if opcion_menu == "Captura del Cuero":
                 conn.commit()
                 conn.close()
 
-                # 2. CONEXIÓN DIRECTA CON ACOMODO DE MOLDES (Guardar en Session State)
                 st.session_state["ultima_captura_cuero"] = ruta_archivo_guardado
-                st.success("¡Captura guardada! Foto enviada automáticamente al módulo 'Acomodo de Moldes'.")
+                st.success("¡Captura guardada!")
                 st.rerun()
 
     if st.button("➕  Tomar foto / video del cuero", type="primary", use_container_width=True):
@@ -164,23 +162,23 @@ if opcion_menu == "Captura del Cuero":
 
     st.write("---")
 
-    # Mostrar publicaciones pasadas
+    # Mostrar publicaciones pasadas con opción de eliminación
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT usuario, titulo, fecha, media_path FROM feed ORDER BY id DESC")
+    c.execute("SELECT id, usuario, titulo, fecha, media_path FROM feed ORDER BY id DESC")
     posts = c.fetchall()
     conn.close()
 
     if not posts:
-        st.info("No hay capturas registradas. Presiona el botón ➕ de arriba para tomar la primera foto.")
+        st.info("No hay capturas registradas. Presiona ➕ para tomar la primera foto.")
     else:
         for p in posts:
-            usr, tit, fecha, media = p
+            post_id, usr, tit, fecha, media = p
             with st.container():
                 st.markdown(f"""
                 <div class="feed-card">
                     <small style="color: #73604f; font-weight: 600;">{usr} • {fecha}</small>
-                    <h4 style="margin-top: 4px; margin-bottom: 8px; color: #2c2520;">{tit}</h4>
+                    <h4 style="margin-top: 4px; margin-bottom: 4px; color: #2c2520;">{tit}</h4>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -189,9 +187,33 @@ if opcion_menu == "Captura del Cuero":
                         st.video(media)
                     else:
                         st.image(media, use_column_width=True)
+
+                col_del, _ = st.columns([1, 3])
+                with col_del:
+                    if st.button(f"🗑️ Eliminar foto", key=f"del_{post_id}"):
+                        # 1. Borrar de la base de datos
+                        conn = sqlite3.connect(DB_PATH)
+                        c = conn.cursor()
+                        c.execute("DELETE FROM feed WHERE id = ?", (post_id,))
+                        conn.commit()
+                        conn.close()
+
+                        # 2. Borrar archivo físico del disco si existe
+                        if media and os.path.exists(media):
+                            try:
+                                os.remove(media)
+                            except Exception:
+                                pass
+
+                        # 3. Limpiar memoria conectada si era la última foto activa
+                        if st.session_state.get("ultima_captura_cuero") == media:
+                            st.session_state["ultima_captura_cuero"] = None
+
+                        st.success("Foto eliminada correctamente.")
+                        st.rerun()
                 st.divider()
 
-# ================================================================== MÓDULO 2: ACOMODO DE MOLDES (CONECTADO)
+# ================================================================== MÓDULO 2: ACOMODO DE MOLDES
 elif opcion_menu == "Acomodo de Moldes":
     st.title("Acomodo de Moldes")
     st.caption("Inspección de imperfecciones en la piel capturada y cálculo de nidificación (Nesting).")
@@ -200,14 +222,16 @@ elif opcion_menu == "Acomodo de Moldes":
     with col_a:
         st.subheader("1. Imagen de Piel Activa")
         
-        # VERIFICACIÓN DE CONEXIÓN AUTOMÁTICA
         foto_conectada = st.session_state.get("ultima_captura_cuero")
         
         if foto_conectada and os.path.exists(foto_conectada):
             st.success("⚡ Imagen obtenida directamente de 'Captura del Cuero'")
             st.image(foto_conectada, caption="Piel seleccionada para procesamiento", use_column_width=True)
+            if st.button("❌ Desvincular esta foto"):
+                st.session_state["ultima_captura_cuero"] = None
+                st.rerun()
         else:
-            st.info("No hay una foto reciente capturada. Puedes tomar una en 'Captura del Cuero' o subir una imagen manual aquí:")
+            st.info("No hay una foto activa. Puedes tomar una en 'Captura del Cuero' o subir una imagen manual aquí:")
 
         fotos_manuales = st.file_uploader("Subir otra foto manualmente", accept_multiple_files=True, key="fotos")
         demo = st.button("Usar Muestra de Prueba (Demo)")
@@ -234,7 +258,6 @@ elif opcion_menu == "Acomodo de Moldes":
 
     st.write("---")
     
-    # El botón se habilita si hay foto conectada por sesión, fotos manuales o demo
     tiene_imagen = bool(foto_conectada or fotos_manuales or demo)
     procesar_click = st.button("Iniciar Procesamiento y Acomodo de Corte", type="primary", disabled=not tiene_imagen)
 
@@ -251,7 +274,6 @@ elif opcion_menu == "Acomodo de Moldes":
         shutil.rmtree(carp_f, ignore_errors=True)
         os.makedirs(carp_f)
         
-        # Usar la foto conectada o las manuales
         if foto_conectada and not fotos_manuales:
             dest = os.path.join(carp_f, os.path.basename(foto_conectada))
             shutil.copy(foto_conectada, dest)
