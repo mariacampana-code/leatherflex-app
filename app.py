@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Manteniendo UI exacta con Botón de Detección en Columna de Cuero"""
+"""Leather-Flex 3D - Módulo Independiente de Detección de Defectos"""
 import os
 import json
 import sqlite3
@@ -163,7 +163,7 @@ def detectar_defectos_cuero(bytes_imagen):
         x, y, bw, bh = cv2.boundingRect(c)
         reporte_defectos.append({
             "id": i+1,
-            "tipo": "Imperfección",
+            "tipo": "Imperfeccion",
             "area_px2": area,
             "bbox": (x, y, bw, bh)
         })
@@ -197,7 +197,7 @@ def init_db():
             ("Bolsillo Frontal Billetera", "Personalizado", "110 x 80", [(0,0), (110,0), (100,80), (10,80)]),
             ("Tirante Mochila Cuero", "Artisan Leather", "450 x 45", [(0,0), (450,0), (440,45), (10,45)]),
             ("Cuerpo Bolso Mano", "Moda & Cuero", "350 x 250", [(0,0), (350,0), (330,250), (20,250)]),
-            ("Plantilla Ergonómica Talla 42", "Industrial Boot", "280 x 95", [(0,0), (280,0), (260,95), (20,95)]),
+            ("Plantilla Ergonomica Talla 42", "Industrial Boot", "280 x 95", [(0,0), (280,0), (260,95), (20,95)]),
             ("Capellada Zapato Oxford", "Calzados Lujo", "240 x 160", [(0,0), (240,0), (220,160), (20,160)])
         ]
         for nom, cli, dim, pts in moldes_demo:
@@ -221,7 +221,7 @@ with st.sidebar:
     
     opcion_menu = st.radio(
         "Navegacion",
-        ["Captura del Cuero", "Acomodo de Moldes", "Calibración de Escáner", "Catálogo de Moldes", "Biblioteca Técnica"],
+        ["Captura del Cuero", "Detección de Defectos", "Acomodo de Moldes", "Calibración de Escáner", "Catálogo de Moldes", "Biblioteca Técnica"],
         label_visibility="collapsed"
     )
 
@@ -245,7 +245,7 @@ if opcion_menu == "Captura del Cuero":
 
         nota_rapida = st.text_input("Identificador / Lote (Opcional)", placeholder="Ej. Lote Cuero Vacuno A-1")
         
-        if st.button("Guardar y Enviar a Acomodo de Moldes", type="primary", use_container_width=True):
+        if st.button("Guardar y Enviar a Detección de Defectos", type="primary", use_container_width=True):
             if archivo_subido is None:
                 st.warning("Por favor toma una foto/video o elige un archivo.")
             else:
@@ -317,10 +317,68 @@ if opcion_menu == "Captura del Cuero":
                         st.rerun()
                 st.divider()
 
-# ================================================================== MÓDULO 2: ACOMODO DE MOLDES
+# ================================================================== MÓDULO 2: DETECCIÓN DE DEFECTOS (NUEVO PAGO PREVIO)
+elif opcion_menu == "Detección de Defectos":
+    st.title("Detección de Defectos")
+    st.caption("Analiza la superficie del cuero mediante visión artificial para identificar imperfecciones antes del acomodo.")
+
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("1. Piel Seleccionada")
+        foto_conectada = st.session_state.get("ultima_captura_cuero")
+        bytes_analizar = None
+
+        if foto_conectada and os.path.exists(foto_conectada):
+            st.success("Piel cargada desde Captura del Cuero")
+            with open(foto_conectada, "rb") as f:
+                bytes_analizar = f.read()
+            st.image(foto_conectada, caption="Imagen original de la piel", use_column_width=True)
+        else:
+            st.info("No hay una foto activa de la captura. Sube una imagen manual:")
+
+        foto_manual = st.file_uploader("Subir foto manualmente", type=["jpg", "jpeg", "png"], key="def_manual")
+        if foto_manual and bytes_analizar is None:
+            bytes_analizar = foto_manual.getbuffer()
+
+        demo_def = st.button("Usar Muestra de Prueba")
+
+        st.write("---")
+        btn_ejecutar_analisis = st.button("Ejecutar Análisis de Defectos", type="primary", use_container_width=True, disabled=(bytes_analizar is None and not demo_def))
+
+    with col2:
+        st.subheader("2. Resultado del Análisis")
+        
+        if btn_ejecutar_analisis:
+            with st.spinner("Procesando imagen con visión artificial..."):
+                if demo_def or bytes_analizar is None:
+                    bytes_analizar = cv2.imencode('.jpg', np.zeros((600, 800, 3), np.uint8))[1].tobytes()
+
+                img_viz, obstaculos_px, reporte_def = detectar_defectos_cuero(bytes_analizar)
+                st.session_state["defectos_guardados"] = {
+                    "img_viz": img_viz,
+                    "reporte": reporte_def,
+                    "obstaculos": obstaculos_px
+                }
+
+        if st.session_state.get("defectos_guardados"):
+            res_def = st.session_state["defectos_guardados"]
+            if res_def["img_viz"] is not None:
+                st.image(res_def["img_viz"], use_column_width=True, caption="Imperfecciones marcadas en rojo")
+            
+            st.write(f"**Defectos detectados:** {len(res_def['reporte'])}")
+            st.dataframe(
+                [{"N°": d["id"], "Tipo": d["tipo"], "Área (px²)": int(d["area_px2"])} for d in res_def["reporte"]],
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("Presiona 'Ejecutar Análisis de Defectos' para visualizar las imperfecciones.")
+
+# ================================================================== MÓDULO 3: ACOMODO DE MOLDES (UI EXACTA RESTAURADA)
 elif opcion_menu == "Acomodo de Moldes":
     st.title("Acomodo de Moldes")
-    st.caption("Inspección de imperfecciones en la piel capturada y cálculo de nidificación (Nesting).")
+    st.caption("Inspección de imperfecciones en la piel capturada y cálculo de nidificación.")
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -336,7 +394,6 @@ elif opcion_menu == "Acomodo de Moldes":
             st.image(foto_conectada, caption="Piel seleccionada para procesamiento", use_column_width=True)
             if st.button("Desvincular esta foto"):
                 st.session_state["ultima_captura_cuero"] = None
-                st.session_state["defectos_previos"] = None
                 st.rerun()
         else:
             st.info("No hay una foto activa. Toma una en 'Captura del Cuero' o sube una imagen manual aquí:")
@@ -346,28 +403,6 @@ elif opcion_menu == "Acomodo de Moldes":
             imagen_a_procesar_bytes = fotos_manuales.getbuffer()
 
         demo = st.button("Usar Muestra de Prueba (Demo con defectos simulados)")
-
-        # -------------------------------------------------------------- BOTÓN DETECTOR PREVIO
-        if (imagen_a_procesar_bytes is not None or demo):
-            if st.button("🔍 Analizar y Detectar Defectos en el Cuero", use_container_width=True):
-                with st.spinner("Visión Artificial analizando el cuero..."):
-                    bytes_det = imagen_a_procesar_bytes
-                    if demo:
-                        bytes_det = cv2.imencode('.jpg', np.zeros((600,800,3), np.uint8))[1].tobytes()
-                    
-                    img_viz, obstaculos_px, reporte_def = detectar_defectos_cuero(bytes_det)
-                    st.session_state["defectos_previos"] = {
-                        "img_viz": img_viz,
-                        "reporte": reporte_def
-                    }
-
-            if st.session_state.get("defectos_previos"):
-                st.write("---")
-                st.markdown("**Imperfecciones Detectadas por Visión Artificial:**")
-                def_prev = st.session_state["defectos_previos"]
-                if def_prev["img_viz"] is not None:
-                    st.image(def_prev["img_viz"], use_column_width=True, caption="Fallas marcadas en rojo")
-                st.dataframe([{"N°": d["id"], "Tipo": d["tipo"], "Área (px²)": int(d["area_px2"])} for d in def_prev["reporte"]], use_container_width=True, hide_index=True)
 
     with col_b:
         st.subheader("2. Selección de Moldes del Catálogo")
@@ -424,7 +459,7 @@ elif opcion_menu == "Acomodo de Moldes":
             with open(path_img_cuero, "rb") as f_read:
                 img_viz, obstaculos_px, reporte_def = detectar_defectos_cuero(f_read.read())
 
-            status.write("Calculando acomodo óptico (Nesting)...")
+            status.write("Calculando acomodo óptico...")
             salida = os.path.join(TMP, "salida")
             cfg = Config()
             
