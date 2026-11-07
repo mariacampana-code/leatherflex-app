@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Integración Total Catálogo y Acomodo de Moldes"""
+"""Leather-Flex 3D - Traducido 100% al Español (UI Native Fix)"""
 import os
 import json
 import sqlite3
@@ -82,6 +82,34 @@ st.markdown("""
         margin-bottom: 12px;
         border: 1px solid rgba(255, 255, 255, 0.9);
         box-shadow: 0 8px 20px rgba(0,0,0,0.05);
+    }
+
+    /* TRADUCCIONES EN CSS PARA BOTONES Y CAMPOS NATIVOS */
+    div[data-testid="stFileUploader"] button {
+        font-size: 0 !important;
+    }
+    div[data-testid="stFileUploader"] button::after {
+        content: "Subir archivo" !important;
+        font-size: 14px !important;
+    }
+    div[data-testid="stFileUploaderDropzoneInstructions"] span {
+        display: none !important;
+    }
+    div[data-testid="stFileUploaderDropzoneInstructions"]::after {
+        content: "Límite 200MB por archivo" !important;
+        font-size: 12px !important;
+        color: #73604f !important;
+    }
+    div[data-baseweb="select"] input::placeholder {
+        color: transparent !important;
+    }
+    div[data-baseweb="select"] [aria-selected="false"] {
+        font-size: 0 !important;
+    }
+    div[data-baseweb="select"] [aria-selected="false"]::before {
+        content: "Elegir opciones" !important;
+        font-size: 14px !important;
+        color: #73604f !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -293,7 +321,6 @@ elif opcion_menu == "Acomodo de Moldes":
     with col_b:
         st.subheader("2. Selección de Moldes (Catálogo o Archivo)")
         
-        # Obtener moldes guardados en la BD del catálogo
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("SELECT id, nombre, cliente, archivo_dxf FROM moldes ORDER BY id DESC")
@@ -304,7 +331,7 @@ elif opcion_menu == "Acomodo de Moldes":
         if moldes_bd:
             st.write("**Seleccionar del Catálogo Registrado:**")
             opciones_cat = {f"{m[1]} ({m[2]})": m[3] for m in moldes_bd}
-            moldes_elegidos = st.multiselect("Elegir moldes para cortar:", list(opciones_cat.keys()))
+            moldes_elegidos = st.multiselect("Elegir moldes para cortar:", list(opciones_cat.keys()), placeholder="Elegir opciones")
             
             for m_nombre in moldes_elegidos:
                 path_dxf_cat = opciones_cat[m_nombre]
@@ -502,7 +529,6 @@ elif opcion_menu == "Catálogo de Moldes":
                     with open(ruta_guardada, "w") as f:
                         f.write(contenido_dxf)
 
-                    # Guardar la foto física en disco para mostrar en la tarjeta
                     ruta_foto_img = os.path.join(TMP, f"img_{nom_f.replace(' ', '_')}.jpg")
                     with open(ruta_foto_img, "wb") as f_img:
                         f_img.write(foto_molde.getbuffer())
@@ -532,7 +558,6 @@ elif opcion_menu == "Catálogo de Moldes":
                     st.write(f"Dimensiones: **{m[3]}**")
                     st.caption("Origen: Digitalizado por Fotografía")
                     
-                    # Permite descargar su vector DXF generado automáticamente
                     contenido_dxf = ""
                     if m[5] and os.path.exists(m[5]):
                         with open(m[5], "r") as f_dxf:
