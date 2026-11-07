@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Traducido 100% al Español (UI Native Fix)"""
+"""Leather-Flex 3D - Conexión de Catálogo a Acomodo y UI Limpia"""
 import os
 import json
 import sqlite3
@@ -82,34 +82,6 @@ st.markdown("""
         margin-bottom: 12px;
         border: 1px solid rgba(255, 255, 255, 0.9);
         box-shadow: 0 8px 20px rgba(0,0,0,0.05);
-    }
-
-    /* TRADUCCIONES EN CSS PARA BOTONES Y CAMPOS NATIVOS */
-    div[data-testid="stFileUploader"] button {
-        font-size: 0 !important;
-    }
-    div[data-testid="stFileUploader"] button::after {
-        content: "Subir archivo" !important;
-        font-size: 14px !important;
-    }
-    div[data-testid="stFileUploaderDropzoneInstructions"] span {
-        display: none !important;
-    }
-    div[data-testid="stFileUploaderDropzoneInstructions"]::after {
-        content: "Límite 200MB por archivo" !important;
-        font-size: 12px !important;
-        color: #73604f !important;
-    }
-    div[data-baseweb="select"] input::placeholder {
-        color: transparent !important;
-    }
-    div[data-baseweb="select"] [aria-selected="false"] {
-        font-size: 0 !important;
-    }
-    div[data-baseweb="select"] [aria-selected="false"]::before {
-        content: "Elegir opciones" !important;
-        font-size: 14px !important;
-        color: #73604f !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -331,7 +303,7 @@ elif opcion_menu == "Acomodo de Moldes":
         if moldes_bd:
             st.write("**Seleccionar del Catálogo Registrado:**")
             opciones_cat = {f"{m[1]} ({m[2]})": m[3] for m in moldes_bd}
-            moldes_elegidos = st.multiselect("Elegir moldes para cortar:", list(opciones_cat.keys()), placeholder="Elegir opciones")
+            moldes_elegidos = st.multiselect("Elegir moldes para cortar:", list(opciones_cat.keys()))
             
             for m_nombre in moldes_elegidos:
                 path_dxf_cat = opciones_cat[m_nombre]
