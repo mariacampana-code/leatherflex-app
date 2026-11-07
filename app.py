@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Traducido 100% al Español Directo"""
+"""Leather-Flex 3D - Modal de Captura Directa en Catálogo de Moldes"""
 import os
 import json
 import sqlite3
@@ -24,7 +24,7 @@ st.set_page_config(
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 
-# ------------------------------------------------------------------ CSS Personalizado y Traducción Forzada
+# ------------------------------------------------------------------ CSS Personalizado
 st.markdown("""
 <style>
     .stApp {
@@ -84,30 +84,6 @@ st.markdown("""
         box-shadow: 0 8px 20px rgba(0,0,0,0.05);
     }
 </style>
-
-<script>
-    const traducir = () => {
-        // Traducir cargadores de archivos
-        document.querySelectorAll('button[kind="secondary"]').forEach(btn => {
-            if (btn.innerText.includes("Upload")) {
-                btn.innerText = "Subir archivo";
-            }
-        });
-        // Traducir límites de archivo
-        document.querySelectorAll('section[data-testid="stFileUploaderDropzoneInstructions"] span').forEach(span => {
-            if (span.innerText.includes("200MB per file")) {
-                span.innerText = "Máximo 200MB por archivo";
-            }
-        });
-        // Traducir selectores múltiples
-        document.querySelectorAll('div[data-baseweb="select"] input').forEach(inp => {
-            if (inp.placeholder === "Choose options") {
-                inp.placeholder = "Elegir opciones";
-            }
-        });
-    };
-    setInterval(traducir, 500);
-</script>
 """, unsafe_allow_html=True)
 
 def generar_contenido_dxf(puntos):
@@ -350,7 +326,7 @@ elif opcion_menu == "Acomodo de Moldes":
                     f.write(a.getbuffer())
                 try:
                     pol = acomodo.molde_desde_dxf(path_a)
-                    cant = st.number_input(f"Cantidad {a.name}", 1, 500, 1, key="c_" + a.name)
+                    cant = st.number_input(f"Cantidad {a.name}", 1, 500, 1, key=f"c_" + a.name)
                     moldes_seleccionados.append({"nombre": os.path.splitext(a.name)[0], "poligono": pol, "cantidad": cant})
                 except Exception as e:
                     st.error(f"Error en {a.name}: {e}")
@@ -508,12 +484,19 @@ elif opcion_menu == "Catálogo de Moldes":
         st.write("### Digitalización Rápida en Taller")
         st.caption("Coloca el molde de cartón o papel sobre la mesa y tómale una foto limpia desde arriba.")
         
-        foto_molde = st.file_uploader("Tomar foto al molde de cartón", type=["jpg", "png", "jpeg"], key="foto_m_fisico")
-        with st.form("form_foto_molde"):
+        @st.dialog("Digitalizar Nuevo Molde Físico")
+        def modal_capturar_molde_foto():
+            st.write("### Tomar foto o seleccionar archivo del molde:")
+            foto_molde = st.file_uploader(
+                "Toma una foto del molde o elige de tu galería", 
+                type=["jpg", "png", "jpeg"],
+                help="Al presionar se abrirá la cámara nativa de tu dispositivo"
+            )
+
             nom_f = st.text_input("Nombre de la Pieza", value="Bolsillo Frontal Billetera")
             cli_f = st.text_input("Cliente", value="Personalizado")
             
-            if st.form_submit_button("Digitalizar y Guardar en Catálogo", type="primary"):
+            if st.button("Digitalizar y Guardar en Catálogo", type="primary", use_container_width=True):
                 if not foto_molde or not nom_f:
                     st.warning("Por favor toma la foto y escribe el nombre de la pieza.")
                 else:
@@ -537,6 +520,9 @@ elif opcion_menu == "Catálogo de Moldes":
                     conn.close()
                     st.success(f"Molde '{nom_f}' digitalizado y guardado con éxito.")
                     st.rerun()
+
+        if st.button("Tomar foto / subir foto al molde", type="primary", use_container_width=True):
+            modal_capturar_molde_foto()
 
         st.write("---")
         conn = sqlite3.connect(DB_PATH)
@@ -570,7 +556,7 @@ elif opcion_menu == "Catálogo de Moldes":
                         key=f"btn_foto_{m[0]}"
                     )
         else:
-            st.info("Sin fotos de moldes registradas. Toma tu primera foto en el formulario de arriba.")
+            st.info("Sin fotos de moldes registradas. Presiona el botón de arriba para capturar el primero.")
 
     with tab_dxf:
         with st.form("nuevo_molde_dxf"):
