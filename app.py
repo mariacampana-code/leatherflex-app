@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Moldes Curvos Reales de Calzado (Frente, Talón, Suela)"""
+"""Leather-Flex 3D - Acomodo Óptimo de Moldes de Calzado con Margen de Cuchilla"""
 import os
 import json
 import sqlite3
@@ -86,13 +86,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------------------------------------------------------ Geometría Fiel de los Moldes de Calzado
+# ------------------------------------------------------------------ Geometría Anatómica de Moldes
 def obtener_puntos_molde_calzado(tipo):
-    """Retorna las curvas y vértices de los moldes de la imagen."""
+    """Retorna las coordenadas vectoriales reales de las piezas de calzado."""
     tipo_l = tipo.lower()
     
     if "frente" in tipo_l:
-        # Molde Capellada Frente (Arco superiorcóncavo y puntas laterales)
         return np.array([
             [10, 0], [60, 40], [120, 50], [180, 40], [230, 0],
             [240, 50], [220, 110], [180, 140], [120, 125], [60, 140],
@@ -100,14 +99,12 @@ def obtener_puntos_molde_calzado(tipo):
         ], np.int32)
         
     elif "talon" in tipo_l or "talón" in tipo_l:
-        # Molde Talón (Semicírculo / Arco superior convexo y base recta)
         return np.array([
             [0, 90], [20, 45], [60, 15], [110, 0], [160, 15],
             [200, 45], [220, 90], [180, 95], [110, 95], [40, 95]
         ], np.int32)
         
     elif "interior" in tipo_l:
-        # Interior de Suela (Forma anatómica estirada con cintura)
         return np.array([
             [20, 0], [110, 5], [100, 110], [80, 170], [85, 230],
             [95, 270], [85, 330], [55, 345], [25, 330], [15, 270],
@@ -115,7 +112,6 @@ def obtener_puntos_molde_calzado(tipo):
         ], np.int32)
         
     elif "suela" in tipo_l:
-        # Suela Calzado Completa (Curva anatómica de pie)
         return np.array([
             [40, 0], [75, 10], [100, 45], [110, 100], [105, 160],
             [85, 210], [90, 270], [80, 320], [50, 340], [20, 320],
@@ -123,7 +119,6 @@ def obtener_puntos_molde_calzado(tipo):
         ], np.int32)
         
     else:
-        # Genérico para otras piezas
         return np.array([[0,0], [160,0], [150,90], [10,90]], np.int32)
 
 def generar_contenido_dxf(puntos):
@@ -229,22 +224,28 @@ def detectar_defectos_cuero(bytes_imagen):
     return img_viz, lista_obstaculos_px, reporte_defectos
 
 def ubicar_moldes_en_piel(img_base, bboxes_defectos, moldes_elegidos_list):
-    """Ubica las piezas curvas del calzado en áreas limpias respetando los recuadros rojos."""
+    """Algoritmo de Nesting con margen de seguridad para la cuchilla alrededor de imperfecciones."""
     h, w, _ = img_base.shape
     res_img = img_base.copy()
     
     ocupado_mask = np.zeros((h, w), dtype=np.uint8)
+    
+    # Margen de tolerancia física de seguridad (20 px para evitar rozar defectos)
+    MARGEN_CUCHILLA = 20
     for d in bboxes_defectos:
         bx, by, bw_d, bh_d = d["bbox"]
-        cv2.rectangle(ocupado_mask, (max(0, bx-12), max(0, by-12)), (min(w, bx+bw_d+12), min(h, by+bh_d+12)), 255, -1)
+        cv2.rectangle(
+            ocupado_mask, 
+            (max(0, bx - MARGEN_CUCHILLA), max(0, by - MARGEN_CUCHILLA)), 
+            (min(w, bx + bw_d + MARGEN_CUCHILLA), min(h, by + bh_d + MARGEN_CUCHILLA)), 
+            255, -1
+        )
 
     piezas_colocadas = 0
 
     for m in moldes_elegidos_list:
         nombre_m = m["nombre"]
         cant = m.get("cantidad", 1)
-        
-        # Obtener los vértices curvos específicos
         base_pts = obtener_puntos_molde_calzado(nombre_m)
 
         min_xy = np.min(base_pts, axis=0)
@@ -274,7 +275,7 @@ def ubicar_moldes_en_piel(img_base, bboxes_defectos, moldes_elegidos_list):
                         cv2.fillPoly(temp_mask, [pts_tras], 255)
 
                         if np.sum(cv2.bitwise_and(ocupado_mask, temp_mask)) == 0:
-                            # Trazado de las curvas del molde de calzado
+                            # Trazado de silueta verde translúcida
                             cv2.polylines(res_img, [pts_tras], True, (0, 255, 0), 3)
                             
                             overlay = res_img.copy()
@@ -284,7 +285,13 @@ def ubicar_moldes_en_piel(img_base, bboxes_defectos, moldes_elegidos_list):
                             tag = f"{nombre_m[:10]} #{k+1}" if cant > 1 else nombre_m[:12]
                             cv2.putText(res_img, tag, (x + 10, y + cur_h//2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
                             
-                            cv2.fillPoly(ocupado_mask, [pts_tras], 255)
+                            # Marcar área ocupada incluyendo holgura entre piezas (10 px)
+                            mask_ocupar = np.zeros((h, w), dtype=np.uint8)
+                            cv2.fillPoly(mask_ocupar, [pts_tras], 255)
+                            kernel_exp = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
+                            mask_ocupar = cv2.dilate(mask_ocupar, kernel_exp)
+                            
+                            ocupado_mask = cv2.bitwise_or(ocupado_mask, mask_ocupar)
                             posicionado = True
                             piezas_colocadas += 1
                             break
@@ -306,7 +313,6 @@ def init_db():
     except Exception:
         pass
 
-    # Precargar el catálogo con las piezas exactas de la imagen del usuario
     c.execute("DELETE FROM moldes")
     carp_dxf = os.path.join(TMP, "moldes_calzado")
     os.makedirs(carp_dxf, exist_ok=True)
@@ -534,7 +540,7 @@ elif opcion_menu == "Acomodo de Moldes":
             moldes_elegidos_nombres = st.multiselect(
                 "Selecciona las piezas de calzado a colocar:",
                 options=nombres_opciones,
-                default=[nombres_opciones[0], nombres_opciones[1]] if len(nombres_opciones) >= 2 else nombres_opciones
+                default=nombres_opciones
             )
 
             for item_nom in moldes_elegidos_nombres:
