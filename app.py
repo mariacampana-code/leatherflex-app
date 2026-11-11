@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Acomodo Óptimo de Moldes de Calzado con Margen de Cuchilla"""
+"""Leather-Flex 3D - Moldes de Calzado Curvos Orgánicos con Margen de Cuchilla"""
 import os
 import json
 import sqlite3
@@ -86,37 +86,61 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------------------------------------------------------ Geometría Anatómica de Moldes
+# ------------------------------------------------------------------ Suavizado de Curvas y Geometría Anatómica
+def suavizar_contorno(puntos, num_puntos=100):
+    """Genera curvas continuas y suaves sin bordes rectos ni esquinas quebradas."""
+    pts = np.array(puntos, dtype=np.float32)
+    pts = np.vstack([pts, pts[0]])  # Cerrar el polígono
+    
+    t = np.linspace(0, 1, len(pts))
+    t_smooth = np.linspace(0, 1, num_puntos)
+    
+    x_smooth = np.interp(t_smooth, t, pts[:, 0])
+    y_smooth = np.interp(t_smooth, t, pts[:, 1])
+    
+    # Filtro de suavizado gaussiano a las coordenadas de los vértices
+    kernel_size = 5
+    x_smooth = cv2.GaussianBlur(x_smooth.astype(np.float32), (kernel_size, 1), 0).ravel()
+    y_smooth = cv2.GaussianBlur(y_smooth.astype(np.float32), (kernel_size, 1), 0).ravel()
+    
+    return np.column_stack([x_smooth, y_smooth]).astype(np.int32)
+
 def obtener_puntos_molde_calzado(tipo):
-    """Retorna las coordenadas vectoriales reales de las piezas de calzado."""
+    """Retorna contornos curvos suaves exactos para cada pieza de calzado."""
     tipo_l = tipo.lower()
     
     if "frente" in tipo_l:
-        return np.array([
-            [10, 0], [60, 40], [120, 50], [180, 40], [230, 0],
-            [240, 50], [220, 110], [180, 140], [120, 125], [60, 140],
-            [20, 110], [0, 50]
-        ], np.int32)
+        pts_clave = [
+            [20, 0], [70, 35], [120, 45], [170, 35], [220, 0],
+            [235, 40], [215, 105], [170, 135], [120, 120], [70, 135],
+            [25, 105], [5, 40]
+        ]
+        return suavizar_contorno(pts_clave, num_puntos=80)
         
     elif "talon" in tipo_l or "talón" in tipo_l:
-        return np.array([
-            [0, 90], [20, 45], [60, 15], [110, 0], [160, 15],
-            [200, 45], [220, 90], [180, 95], [110, 95], [40, 95]
-        ], np.int32)
+        pts_clave = [
+            [0, 90], [15, 45], [55, 12], [110, 0], [165, 12],
+            [205, 45], [220, 90], [170, 95], [110, 95], [50, 95]
+        ]
+        return suavizar_contorno(pts_clave, num_puntos=60)
         
     elif "interior" in tipo_l:
-        return np.array([
-            [20, 0], [110, 5], [100, 110], [80, 170], [85, 230],
-            [95, 270], [85, 330], [55, 345], [25, 330], [15, 270],
-            [25, 230], [30, 170], [10, 110]
-        ], np.int32)
+        # Interior de Suela con cintura curva anatómica continua
+        pts_clave = [
+            [30, 0], [80, 2], [95, 40], [90, 90], [75, 140],
+            [65, 180], [70, 220], [85, 260], [88, 300], [70, 335],
+            [45, 345], [25, 335], [12, 300], [15, 260], [30, 220],
+            [35, 180], [25, 140], [10, 90], [5, 40]
+        ]
+        return suavizar_contorno(pts_clave, num_puntos=120)
         
     elif "suela" in tipo_l:
-        return np.array([
+        pts_clave = [
             [40, 0], [75, 10], [100, 45], [110, 100], [105, 160],
             [85, 210], [90, 270], [80, 320], [50, 340], [20, 320],
             [10, 270], [15, 210], [0, 160], [5, 100], [15, 45]
-        ], np.int32)
+        ]
+        return suavizar_contorno(pts_clave, num_puntos=100)
         
     else:
         return np.array([[0,0], [160,0], [150,90], [10,90]], np.int32)
