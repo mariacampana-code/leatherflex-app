@@ -905,7 +905,7 @@ def extraer_vector_region(contorno, area, area_total, lab_img, grad_mag):
         grad_medio, contraste_anillo, es_oscuro
     ]
 
-def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
+def detectar_defectos_cuero(bytes_imagen, sensibilidad=75, max_defectos=35):
     try:
         arr = np.frombuffer(bytes_imagen, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -946,8 +946,8 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
         mapa_oscuro = cv2.max(dog_oscuro, cv2.max(bh_fino, bh_medio))
         mapa_claro = cv2.max(dog_claro, th_medio)
 
-        umbral_osc = max(7, int(34 - (sensibilidad * 0.27)))
-        umbral_cla = max(9, int(40 - (sensibilidad * 0.29)))
+        umbral_osc = max(9, int(38 - (sensibilidad * 0.27)))
+        umbral_cla = max(11, int(44 - (sensibilidad * 0.29)))
 
         _, mask_osc = cv2.threshold(mapa_oscuro, umbral_osc, 255, cv2.THRESH_BINARY)
         _, mask_cla = cv2.threshold(mapa_claro, umbral_cla, 255, cv2.THRESH_BINARY)
@@ -955,7 +955,7 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
         mask_total = cv2.bitwise_or(mask_osc, mask_cla)
         mask_total = cv2.bitwise_and(mask_total, mask_piel)
 
-        kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         kernel_join = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         mask_total = cv2.morphologyEx(mask_total, cv2.MORPH_OPEN, kernel_clean, iterations=1)
         mask_total = cv2.morphologyEx(mask_total, cv2.MORPH_CLOSE, kernel_join, iterations=1)
@@ -968,17 +968,19 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
         img_viz_bgr = img.copy()
         overlay_rojo = img.copy()
 
-        area_min = 9
-        area_max = int(area_total * 0.15)
+        area_min = 14
+        area_max = int(area_total * 0.08)
         idx_def = 1
 
         for c in cnts_def:
+            if idx_def > max_defectos:
+                break
             area = cv2.contourArea(c)
             if area_min <= area <= area_max:
                 vec_feat = extraer_vector_region(c, area, area_total, lab, grad_mag)
                 clase_id, tipo_label, confianza = predecir_defecto_ia(vec_feat)
 
-                if clase_id == 0 and sensibilidad < 85:
+                if clase_id == 0 and sensibilidad < 88:
                     continue
 
                 if clase_id == 0:
@@ -996,19 +998,20 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
                     "confianza": f"{confianza}%",
                     "area_px2": round(area, 1),
                     "ubicacion": f"X:{x}, Y:{y}",
-                    "bbox": (x, y, bw, bh)
+                    "bbox": (x, y, bw, bh),
+                    "contorno": c.reshape(-1, 2).tolist()
                 })
 
                 cv2.drawContours(overlay_rojo, [c], -1, (0, 0, 255), -1)
                 cx, cy = x + bw // 2, y + bh // 2
-                radio = max(14, int(max(bw, bh) * 0.65))
-                cv2.circle(img_viz_bgr, (cx, cy), radio, (0, 0, 255), 3)
+                radio = min(28, max(10, int(math.sqrt(area / math.pi) + 6)))
+                cv2.circle(img_viz_bgr, (cx, cy), radio, (0, 0, 255), 2)
                 cv2.putText(
                     img_viz_bgr,
                     etiq_corta,
-                    (max(4, cx - radio), max(18, cy - radio - 6)),
+                    (max(4, cx - radio), max(16, cy - radio - 4)),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.54,
+                    0.46,
                     (0, 0, 255),
                     2
                 )
@@ -1020,8 +1023,8 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
     except Exception as e:
         return None, [], [], f"Error técnico al procesar imagen: {str(e)}"
 
-# ------------------------------------------------------------------ Motor de Distribución Automática en TODA la Plancha (A, B, C...)
-def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegidos_list, margen_cuchilla=16, llenar_toda_plancha=True, escala_pieza_pct=100):
+# ------------------------------------------------------------------ Motor de Distribución Automática con Defectos Tenues
+def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegidos_list, margen_cuchilla=10, llenar_toda_plancha=True, escala_pieza_pct=100):
     arr = np.frombuffer(bytes_imagen, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     h_orig, w_orig = img.shape[:2]
@@ -1037,29 +1040,54 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
     area_piel_px = max(1, int(np.sum(mask_piel == 255)))
     ocupado_mask = cv2.bitwise_not(mask_piel)
 
+    # 1. Marcar defectos de manera TENUE (sin círculos gigantes) y bloquear su zona real
+    overlay_def_tenue = res_img.copy()
     defectos_geometria = []
+
     for d in bboxes_defectos:
         bx, by, bw_d, bh_d = d["bbox"]
         cx, cy = bx + bw_d // 2, by + bh_d // 2
-        radio_vis = max(14, int(max(bw_d, bh_d) * 0.65))
-        radio_seg = radio_vis + margen_cuchilla
+        area_d = d.get("area_px2", bw_d * bh_d)
+        radio_tenue = min(22, max(8, int(math.sqrt(max(1.0, area_d) / math.pi) + 4)))
         etiq_def = d["tipo"]
 
-        cv2.circle(res_img, (cx, cy), radio_vis, (0, 0, 255), 3)
-        cv2.putText(
-            res_img, etiq_def,
-            (max(4, cx - radio_vis), max(18, cy - radio_vis - 6)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.54, (0, 0, 255), 2
-        )
-        cv2.circle(ocupado_mask, (cx, cy), radio_seg, 255, -1)
+        pts_cnt = d.get("contorno")
+        if pts_cnt and len(pts_cnt) >= 3:
+            cnt_np = np.array(pts_cnt, dtype=np.int32)
+            cv2.drawContours(overlay_def_tenue, [cnt_np], -1, (90, 90, 220), -1)
+            cv2.drawContours(res_img, [cnt_np], -1, (110, 110, 210), 1)
+
+            mask_d_item = np.zeros((h, w), dtype=np.uint8)
+            cv2.drawContours(mask_d_item, [cnt_np], -1, 255, -1)
+            k_seg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (max(3, margen_cuchilla), max(3, margen_cuchilla)))
+            mask_d_item = cv2.dilate(mask_d_item, k_seg, iterations=1)
+            ocupado_mask = cv2.bitwise_or(ocupado_mask, mask_d_item)
+        else:
+            cv2.circle(overlay_def_tenue, (cx, cy), radio_tenue, (90, 90, 220), -1)
+            cv2.circle(ocupado_mask, (cx, cy), radio_tenue + margen_cuchilla, 255, -1)
+
+        cv2.circle(overlay_def_tenue, (cx, cy), radio_tenue, (100, 100, 210), 1)
         defectos_geometria.append({
             "id": d["id"],
             "cx": cx,
             "cy": cy,
-            "radio": radio_vis,
-            "tipo": etiq_def
+            "radio": radio_tenue,
+            "tipo": etiq_def,
+            "contorno": pts_cnt
         })
 
+    # Mezcla suave (22% opacidad) para que los defectos se vean tenues y no tapen los moldes
+    cv2.addWeighted(overlay_def_tenue, 0.22, res_img, 0.78, 0, res_img)
+
+    # Etiquetas pequeñas y discretas en cada defecto
+    for d_g in defectos_geometria:
+        cv2.putText(
+            res_img, f"x {d_g['tipo'][:12]}",
+            (max(4, d_g["cx"] - d_g["radio"]), max(14, d_g["cy"] - d_g["radio"] - 2)),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.36, (120, 80, 190), 1
+        )
+
+    # 2. Preparar y acomodar los moldes en las zonas sanas
     factor_escala_plancha = (min(w, h) / 680.0) * (escala_pieza_pct / 100.0)
     factor_escala_plancha = max(0.45, factor_escala_plancha)
 
@@ -1084,7 +1112,7 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
 
     if llenar_toda_plancha and len(cola_piezas) > 0:
         area_promedio_pieza = max(1000.0, np.mean([p["area"] for p in cola_piezas]))
-        max_piezas_estimadas = min(45, max(len(cola_piezas), int((area_piel_px * 0.72) / area_promedio_pieza)))
+        max_piezas_estimadas = min(45, max(len(cola_piezas), int((area_piel_px * 0.75) / area_promedio_pieza)))
         cola_expandida = []
         idx_ciclo = 0
         while len(cola_expandida) < max_piezas_estimadas:
@@ -1099,8 +1127,8 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
     area_ocupada_moldes = 0.0
     idx_colocada = 0
 
-    paso_x = max(8, w // 75)
-    paso_y = max(8, h // 65)
+    paso_x = max(8, w // 80)
+    paso_y = max(8, h // 70)
 
     for pieza in cola_piezas:
         nombre_m = pieza["nombre"]
@@ -1124,10 +1152,10 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
             if posicionado or cur_w >= w - 16 or cur_h >= h - 16:
                 continue
 
-            for y in range(12, h - cur_h - 12, paso_y):
+            for y in range(10, h - cur_h - 10, paso_y):
                 if posicionado:
                     break
-                for x in range(12, w - cur_w - 12, paso_x):
+                for x in range(10, w - cur_w - 10, paso_x):
                     if (ocupado_mask[y, x] > 0 or
                         ocupado_mask[y + cur_h // 2, x + cur_w // 2] > 0 or
                         ocupado_mask[min(h - 1, y + cur_h), min(w - 1, x + cur_w)] > 0):
@@ -1141,7 +1169,7 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
                         letra_m = indice_a_letra_molde(idx_colocada)
                         overlay = res_img.copy()
                         cv2.fillPoly(overlay, [pts_tras], (27, 56, 43))
-                        cv2.addWeighted(overlay, 0.72, res_img, 0.28, 0, res_img)
+                        cv2.addWeighted(overlay, 0.76, res_img, 0.24, 0, res_img)
                         cv2.polylines(res_img, [pts_tras], True, (0, 235, 120), 3)
 
                         cx_m = x + cur_w // 2
@@ -1151,7 +1179,7 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
                             cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 2
                         )
 
-                        kernel_sep = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (12, 12))
+                        kernel_sep = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
                         mask_ocupar = cv2.dilate(temp_mask, kernel_sep)
                         ocupado_mask = cv2.bitwise_or(ocupado_mask, mask_ocupar)
 
@@ -1192,7 +1220,7 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
     }
     return res_img_rgb, datos_plano, piezas_colocadas, piezas_no_cabieron, aprovechamiento_real
 
-# ------------------------------------------------------------------ Generador de Hoja Técnica Imprimible (Fondo Blanco)
+# ------------------------------------------------------------------ Generador de Hoja Técnica Imprimible (Fondo Blanco, Defectos Tenues)
 def generar_hoja_tecnica_imprimible(datos_plano, piezas_colocadas, info_lote):
     w = datos_plano["w"]
     h = datos_plano["h"]
@@ -1221,34 +1249,43 @@ def generar_hoja_tecnica_imprimible(datos_plano, piezas_colocadas, info_lote):
     )
     cv2.putText(
         hoja,
-        "INSTRUCCIONES: Cortar por el contorno negro (A, B, C...). NO cortar zonas tachadas en rojo (X).",
+        "INSTRUCCIONES: Cortar por el contorno negro (A, B, C...). NO cortar zonas sombreadas tenues (defectos).",
         (50, 116), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (200, 90, 20), 1
     )
 
     area_plano = np.ones((h, w, 3), dtype=np.uint8) * 255
     for gx in range(0, w, 50):
-        cv2.line(area_plano, (gx, 0), (gx, h), (235, 235, 235), 1)
+        cv2.line(area_plano, (gx, 0), (gx, h), (242, 242, 242), 1)
     for gy in range(0, h, 50):
-        cv2.line(area_plano, (0, gy), (w, gy), (235, 235, 235), 1)
+        cv2.line(area_plano, (0, gy), (w, gy), (242, 242, 242), 1)
 
     cnts_piel, _ = cv2.findContours(mask_piel, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if cnts_piel:
-        cv2.drawContours(area_plano, cnts_piel, -1, (242, 246, 250), -1)
-        cv2.drawContours(area_plano, cnts_piel, -1, (110, 90, 75), 3)
+        cv2.drawContours(area_plano, cnts_piel, -1, (248, 250, 252), -1)
+        cv2.drawContours(area_plano, cnts_piel, -1, (130, 115, 100), 2)
 
+    # Defectos dibujados de manera TENUE en la hoja blanca (rosa muy suave, trazo fino)
     for d in defectos_geom:
         cx, cy, r = d["cx"], d["cy"], d["radio"]
-        cv2.circle(area_plano, (cx, cy), r, (220, 220, 255), -1)
-        cv2.circle(area_plano, (cx, cy), r, (0, 0, 220), 2)
-        d_x = int(r * 0.65)
-        cv2.line(area_plano, (cx - d_x, cy - d_x), (cx + d_x, cy + d_x), (0, 0, 220), 2)
-        cv2.line(area_plano, (cx - d_x, cy + d_x), (cx + d_x, cy - d_x), (0, 0, 220), 2)
+        pts_cnt = d.get("contorno")
+        if pts_cnt and len(pts_cnt) >= 3:
+            cnt_np = np.array(pts_cnt, dtype=np.int32)
+            cv2.drawContours(area_plano, [cnt_np], -1, (232, 232, 252), -1)
+            cv2.drawContours(area_plano, [cnt_np], -1, (185, 185, 235), 1)
+        else:
+            cv2.circle(area_plano, (cx, cy), r, (232, 232, 252), -1)
+            cv2.circle(area_plano, (cx, cy), r, (185, 185, 235), 1)
+
+        d_x = max(4, int(r * 0.45))
+        cv2.line(area_plano, (cx - d_x, cy - d_x), (cx + d_x, cy + d_x), (185, 185, 235), 1)
+        cv2.line(area_plano, (cx - d_x, cy + d_x), (cx + d_x, cy - d_x), (185, 185, 235), 1)
         cv2.putText(
-            area_plano, f"X {d['tipo']}",
-            (max(4, cx - r), max(16, cy - r - 5)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 0, 210), 2
+            area_plano, f"x {d['tipo'][:12]}",
+            (max(4, cx - r), max(14, cy - r - 2)),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.36, (165, 165, 215), 1
         )
 
+    # Moldes bien nítidos en primer plano
     for p in piezas_geom:
         pts = p["pts"]
         cv2.fillPoly(area_plano, [pts], (255, 255, 255))
@@ -1316,7 +1353,7 @@ def generar_patron_fotografico_png(res_img_bgr, piezas_colocadas, info_lote):
 
     hoja[margen_sup:margen_sup + h, margen_lat:margen_lat + w] = res_img_bgr
     cv2.rectangle(hoja, (margen_lat, margen_sup), (margen_lat + w, margen_sup + h), (0, 0, 0), 2)
-    cv2.putText(hoja, "VERDE: Moldes (A, B, C...) | ROJO: Defectos evitados",
+    cv2.putText(hoja, "VERDE: Moldes (A, B, C...) | SOMBRA TENUE: Defectos evitados",
                 (margen_lat, lienzo_h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (60, 60, 60), 1)
 
     ok, buf = cv2.imencode(".png", hoja)
@@ -1645,7 +1682,7 @@ elif opcion_menu == "Acomodo de Moldes":
                 value=True
             )
             escala_pieza = st.slider("Tamaño de los moldes (%)", 60, 150, 100, 10)
-            margen_seg = st.slider("Separación alrededor de defectos (px)", 5, 45, 16, 2)
+            margen_seg = st.slider("Separación alrededor de defectos (px)", 4, 30, 10, 2)
             sens_nest = st.slider("Sensibilidad detección de defectos", 20, 100, 75, 5)
 
     st.write("---")
@@ -1653,7 +1690,14 @@ elif opcion_menu == "Acomodo de Moldes":
     if st.button("Acomodar Moldes y Ver Plan de Corte", type="primary", use_container_width=True, disabled=not puede_procesar):
         with st.spinner("Ubicando moldes lejos de los defectos..."):
             bytes_plancha_entera = st.session_state["plancha_activa_bytes"]
-            _, obst, rep_def, err = detectar_defectos_cuero(bytes_plancha_entera, sensibilidad=sens_nest)
+
+            # Reutilizar exactamente los defectos detectados en el Paso 2 si existen
+            res_prev_def = st.session_state.get("resultado_plancha_defectos")
+            if res_prev_def and not res_prev_def.get("error") and res_prev_def.get("reporte") is not None:
+                rep_def = res_prev_def["reporte"]
+                err = None
+            else:
+                _, _, rep_def, err = detectar_defectos_cuero(bytes_plancha_entera, sensibilidad=sens_nest)
 
             if err:
                 st.session_state["resultado_nesting_plancha"] = {"error": err}
@@ -1703,7 +1747,7 @@ elif opcion_menu == "Acomodo de Moldes":
             col_v1, col_v2 = st.columns([1.25, 1])
             with col_v1:
                 st.subheader("Plan de Corte Imprimible (Fondo Blanco)")
-                st.caption("Hoja limpia para imprimir en papel sin gastar tinta: moldes A, B, C... y defectos tachados con X.")
+                st.caption("Hoja limpia para imprimir en papel sin gastar tinta: moldes A, B, C... y defectos marcados de forma tenue.")
                 if rn["hoja_tecnica_png"]:
                     st.image(rn["hoja_tecnica_png"], use_container_width=True)
             with col_v2:
