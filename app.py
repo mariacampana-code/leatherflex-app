@@ -11,7 +11,7 @@ import numpy as np
 import streamlit as st
 
 try:
-    from sklearn.ensemble import RandomForestClassifier, IsolationForest
+    from sklearn.ensemble import RandomForestClassifier
     SKLEARN_DISPONIBLE = True
 except ImportError:
     SKLEARN_DISPONIBLE = False
@@ -41,24 +41,17 @@ CLASES_DEFECTOS = [
 
 @st.cache_resource
 def inicializar_modelo_ia():
-    """
-    Entrena en memoria un modelo de Machine Learning (Random Forest) con patrones
-    estadísticos de marroquinería (10 características morfológicas y colorimétricas LAB)
-    para discriminar textura natural del cuero frente a 5 tipos reales de defectos.
-    """
     rng = np.random.default_rng(42)
     X_train = []
     y_train = []
 
-    # Generación de dataset sintético calibrado con firmas físicas de piel bovina/caprina:
-    # [delta_L, delta_A, delta_B, std_L, elongacion, circularidad, area_rel*1000, gradiente, contraste_anillo, es_oscuro]
     perfiles = {
-        0: ([3.5, 1.2, 1.5, 5.0, 1.4, 0.65, 0.15, 12.0, 3.0, 0.5], [2.0, 0.8, 0.8, 2.0, 0.4, 0.15, 0.10, 5.0, 1.5, 0.5]),   # Veta Natural
-        1: ([22.0, 4.5, 5.0, 14.0, 1.25, 0.82, 0.35, 38.0, 24.0, 1.0], [6.0, 2.0, 2.0, 4.0, 0.25, 0.10, 0.25, 10.0, 6.0, 0.1]), # Picadura Garrapata
-        2: ([28.0, 5.0, 6.0, 18.0, 4.5, 0.28, 1.80, 45.0, 26.0, 1.0], [7.0, 2.0, 2.0, 5.0, 1.2, 0.10, 1.00, 12.0, 7.0, 0.2]),  # Cicatriz / Corte
-        3: ([15.0, 3.0, 3.5, 11.0, 3.4, 0.35, 0.90, 28.0, 16.0, 0.7], [4.5, 1.5, 1.5, 3.5, 0.9, 0.12, 0.60, 8.0, 5.0, 0.4]),   # Rasguño Superficial
-        4: ([48.0, 8.0, 9.0, 26.0, 1.35, 0.78, 1.20, 68.0, 46.0, 1.0], [9.0, 3.0, 3.0, 6.0, 0.3, 0.12, 0.80, 14.0, 9.0, 0.1]),  # Agujero / Perforación
-        5: ([18.0, 7.5, 8.0, 12.0, 1.60, 0.55, 8.50, 22.0, 17.0, 0.6], [5.0, 2.5, 2.5, 4.0, 0.5, 0.15, 4.00, 7.0, 5.0, 0.4])   # Mancha Curtido
+        0: ([3.5, 1.2, 1.5, 5.0, 1.4, 0.65, 0.15, 12.0, 3.0, 0.5], [2.0, 0.8, 0.8, 2.0, 0.4, 0.15, 0.10, 5.0, 1.5, 0.5]),
+        1: ([22.0, 4.5, 5.0, 14.0, 1.25, 0.82, 0.35, 38.0, 24.0, 1.0], [6.0, 2.0, 2.0, 4.0, 0.25, 0.10, 0.25, 10.0, 6.0, 0.1]),
+        2: ([28.0, 5.0, 6.0, 18.0, 4.5, 0.28, 1.80, 45.0, 26.0, 1.0], [7.0, 2.0, 2.0, 5.0, 1.2, 0.10, 1.00, 12.0, 7.0, 0.2]),
+        3: ([15.0, 3.0, 3.5, 11.0, 3.4, 0.35, 0.90, 28.0, 16.0, 0.7], [4.5, 1.5, 1.5, 3.5, 0.9, 0.12, 0.60, 8.0, 5.0, 0.4]),
+        4: ([48.0, 8.0, 9.0, 26.0, 1.35, 0.78, 1.20, 68.0, 46.0, 1.0], [9.0, 3.0, 3.0, 6.0, 0.3, 0.12, 0.80, 14.0, 9.0, 0.1]),
+        5: ([18.0, 7.5, 8.0, 12.0, 1.60, 0.55, 8.50, 22.0, 17.0, 0.6], [5.0, 2.5, 2.5, 4.0, 0.5, 0.15, 4.00, 7.0, 5.0, 0.4])
     }
 
     for clase_id, (medias, stds) in perfiles.items():
@@ -80,7 +73,6 @@ def inicializar_modelo_ia():
         clf.fit(X_train, y_train)
         return clf
     else:
-        # Respaldo estadístico en NumPy puro (Clasificador Bayesiano Gaussiano) si no está scikit-learn
         modelo_np = {}
         for c_id in range(len(CLASES_DEFECTOS)):
             sub = X_train[y_train == c_id]
@@ -90,7 +82,6 @@ def inicializar_modelo_ia():
 MODELO_IA_CUERO = inicializar_modelo_ia()
 
 def predecir_defecto_ia(vector_caracteristicas):
-    """Retorna (clase_id, nombre_clase, confianza_pct) usando el modelo de IA entrenado."""
     vec = np.array(vector_caracteristicas, dtype=np.float32).reshape(1, -1)
     if SKLEARN_DISPONIBLE:
         probs = MODELO_IA_CUERO.predict_proba(vec)[0]
@@ -291,11 +282,9 @@ def aislar_piel_del_fondo(img_bgr):
     return mask_interior
 
 def extraer_vector_region(contorno, area, area_total, lab_img, grad_mag):
-    """Extrae el vector de 10 características físicas de cada región sospechosa para el modelo de IA."""
     h, w = lab_img.shape[:2]
     x, y, bw, bh = cv2.boundingRect(contorno)
 
-    # Anillo exterior circundante (piel sana alrededor del defecto)
     pad = max(6, int(max(bw, bh) * 0.45))
     x1, y1 = max(0, x - pad), max(0, y - pad)
     x2, y2 = min(w, x + bw + pad), min(h, y + bh + pad)
@@ -340,12 +329,6 @@ def extraer_vector_region(contorno, area, area_total, lab_img, grad_mag):
     ]
 
 def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
-    """
-    Pipeline híbrido Visión Artificial + IA (Random Forest):
-    1) Extracción de candidatos multi-escala (DoG + BlackHat + TopHat)
-    2) Evaluación de cada candidato con el clasificador de IA embebido
-    3) Filtrado de falsos positivos (veta natural) y marcado en rojo de defectos reales
-    """
     try:
         arr = np.frombuffer(bytes_imagen, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -368,12 +351,10 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
         clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(12, 12))
         l_norm = clahe.apply(l_chan)
 
-        # Mapa de gradientes Sobel para medir nitidez de bordes de la falla
         gx = cv2.Sobel(l_norm, cv2.CV_32F, 1, 0, ksize=3)
         gy = cv2.Sobel(l_norm, cv2.CV_32F, 0, 1, ksize=3)
         grad_mag = cv2.magnitude(gx, gy)
 
-        # Extracción multi-escala de candidatos
         g_fino = cv2.GaussianBlur(l_norm, (3, 3), 0)
         g_medio = cv2.GaussianBlur(l_norm, (15, 15), 0)
         dog_oscuro = cv2.subtract(g_medio, g_fino)
@@ -417,11 +398,9 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
         for c in cnts_def:
             area = cv2.contourArea(c)
             if area_min <= area <= area_max:
-                # Inferencia del modelo de IA embebido
                 vec_feat = extraer_vector_region(c, area, area_total, lab, grad_mag)
                 clase_id, tipo_label, confianza = predecir_defecto_ia(vec_feat)
 
-                # Si la IA clasifica como veta natural sana con alta certeza y sensibilidad < 85, descartar falso positivo
                 if clase_id == 0 and sensibilidad < 85:
                     continue
 
@@ -655,43 +634,93 @@ if not os.path.exists(ruta_cal):
     with open(ruta_cal, "w") as f:
         json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
 
-# ================================================================== MÓDULO 1: CAPTURA DEL CUERO
+# ================================================================== MÓDULO 1: CAPTURA DEL CUERO (VISTA ÚNICA UNIFICADA)
 if opcion_menu == "Captura del Cuero":
     st.title("Captura del Cuero")
-    st.caption("Sube múltiples fotos/videos a la vez o captura directamente desde la cámara.")
+    st.caption("Sube varias fotos o videos desde tu biblioteca, o toma múltiples fotos en vivo seguidas en una sola ventana.")
 
-    tab_multi, tab_cam = st.tabs(["Subir Muchas Fotos a la Vez", "Cámara en Vivo"])
+    # Estado acumulativo para fotos tomadas en vivo una tras otra
+    if "bandeja_camara_vivo" not in st.session_state:
+        st.session_state["bandeja_camara_vivo"] = []
+    if "cam_counter" not in st.session_state:
+        st.session_state["cam_counter"] = 0
 
-    with tab_multi:
-        nota_lote = st.text_input("Nombre del Lote", placeholder="Ej. Lote Cuero Vacuno A-1", key="nota_lote")
-        archivos_subidos = st.file_uploader(
-            "Selecciona todas las fotos que necesites al mismo tiempo",
-            type=["jpg", "png", "jpeg", "webp", "mp4", "mov"],
-            accept_multiple_files=True,
-            key="multi_uploader_main"
-        )
-        if archivos_subidos:
-            st.success(f"{len(archivos_subidos)} archivo(s) cargados en memoria.")
-            if st.button(f"Guardar {len(archivos_subidos)} Archivo(s) en Historial y Analizar", type="primary", use_container_width=True):
-                rutas_lote = []
-                for idx, arch in enumerate(archivos_subidos):
-                    etiqueta = f"{nota_lote} #{idx+1}" if nota_lote else f"Piel #{idx+1} ({arch.name})"
-                    r = guardar_captura_en_bd(arch.name, arch.getvalue(), etiqueta)
-                    if not r.endswith((".mp4", ".mov")):
-                        rutas_lote.append(r)
-                st.session_state["lote_pieles_activas"] = rutas_lote
-                st.success(f"{len(archivos_subidos)} archivos guardados correctamente.")
-                st.rerun()
+    with st.container(border=True):
+        nota_lote = st.text_input("Identificador / Nombre del Lote (Opcional)", placeholder="Ej. Lote Cuero Vacuno Mesa 1", key="nota_unica")
 
-    with tab_cam:
-        nota_cam = st.text_input("Identificador de Pieza", placeholder="Ej. Mesa Corte 1", key="nota_cam")
-        foto_camara = st.camera_input("Captura directa desde cámara móvil o webcam")
-        if foto_camara is not None:
-            if st.button("Guardar Foto de Cámara", type="primary", use_container_width=True):
-                r = guardar_captura_en_bd("camara.jpg", foto_camara.getvalue(), nota_cam or "Captura Cámara")
-                st.session_state["lote_pieles_activas"] = [r]
-                st.success("Foto guardada y lista para análisis.")
-                st.rerun()
+        col_lib, col_cam = st.columns([1, 1])
+
+        with col_lib:
+            st.subheader("1. Desde Biblioteca (Fotos y Videos)")
+            archivos_biblioteca = st.file_uploader(
+                "Selecciona una o varias fotos / videos a la vez",
+                type=["jpg", "png", "jpeg", "webp", "mp4", "mov", "avi"],
+                accept_multiple_files=True,
+                key="uploader_unico_biblioteca"
+            )
+            if archivos_biblioteca:
+                st.info(f"{len(archivos_biblioteca)} archivo(s) seleccionados de la biblioteca.")
+
+        with col_cam:
+            st.subheader("2. Cámara en Vivo (Toma Múltiple)")
+            foto_vivo = st.camera_input(
+                "Toma una foto y agrégala; podrás tomar otra inmediatamente después",
+                key=f"camara_vivo_{st.session_state['cam_counter']}"
+            )
+            if foto_vivo is not None:
+                if st.button("Agregar Esta Foto y Tomar Otra", use_container_width=True):
+                    num = len(st.session_state["bandeja_camara_vivo"]) + 1
+                    st.session_state["bandeja_camara_vivo"].append((f"camara_vivo_{num}.jpg", foto_vivo.getvalue()))
+                    st.session_state["cam_counter"] += 1
+                    st.rerun()
+
+        # Consolidar todo lo acumulado (cámara en vivo + archivos de biblioteca)
+        total_items = []
+        for nom_c, bytes_c in st.session_state["bandeja_camara_vivo"]:
+            total_items.append((nom_c, bytes_c))
+        if archivos_biblioteca:
+            for arch in archivos_biblioteca:
+                total_items.append((arch.name, arch.getvalue()))
+
+        if total_items:
+            st.write("---")
+            st.markdown(f"**Archivos listos para guardar ({len(total_items)} en total):**")
+            cols_prev = st.columns(4)
+            for idx_p, (nom_p, bytes_p) in enumerate(total_items):
+                with cols_prev[idx_p % 4]:
+                    if nom_p.lower().endswith((".mp4", ".mov", ".avi")):
+                        st.video(bytes_p)
+                        st.caption(nom_p)
+                    else:
+                        st.image(bytes_p, caption=nom_p, use_container_width=True)
+
+            col_g1, col_g2 = st.columns([3, 1])
+            with col_g1:
+                if st.button(f"Guardar {len(total_items)} Archivo(s) y Preparar Análisis", type="primary", use_container_width=True):
+                    rutas_lote = []
+                    imagenes_memoria = []
+                    for idx, (nom_item, bytes_item) in enumerate(total_items):
+                        etiqueta = f"{nota_lote} #{idx+1}" if nota_lote else f"Captura #{idx+1} ({nom_item})"
+                        ruta_g = guardar_captura_en_bd(nom_item, bytes_item, etiqueta)
+                        if not nom_item.lower().endswith((".mp4", ".mov", ".avi")):
+                            rutas_lote.append(ruta_g)
+                            imagenes_memoria.append((nom_item, bytes_item))
+
+                    if imagenes_memoria:
+                        st.session_state["lote_pieles_activas"] = rutas_lote
+                        st.session_state["imagenes_def_memoria"] = imagenes_memoria
+                        st.session_state["pieles_nesting_memoria"] = imagenes_memoria
+
+                    st.session_state["bandeja_camara_vivo"] = []
+                    st.session_state["cam_counter"] += 1
+                    st.success(f"{len(total_items)} archivo(s) guardados correctamente.")
+                    st.rerun()
+
+            with col_g2:
+                if st.button("Limpiar Bandeja", use_container_width=True):
+                    st.session_state["bandeja_camara_vivo"] = []
+                    st.session_state["cam_counter"] += 1
+                    st.rerun()
 
     st.write("---")
     st.subheader("Historial de Capturas Registradas")
@@ -702,7 +731,7 @@ if opcion_menu == "Captura del Cuero":
     conn.close()
 
     if not posts:
-        st.info("No hay capturas aún. Sube tus fotos arriba.")
+        st.info("No hay capturas aún. Sube fotos/videos o toma capturas en vivo arriba.")
     else:
         cols_hist = st.columns(3)
         for idx, p in enumerate(posts):
@@ -710,16 +739,20 @@ if opcion_menu == "Captura del Cuero":
             with cols_hist[idx % 3]:
                 st.markdown(f"<div class='feed-card'><small>{fecha}</small><br><b>{tit}</b></div>", unsafe_allow_html=True)
                 if media and os.path.exists(media):
-                    if media.endswith((".mp4", ".mov")):
+                    if media.lower().endswith((".mp4", ".mov", ".avi")):
                         st.video(media)
                     else:
                         st.image(media, use_container_width=True)
                 c1, c2 = st.columns(2)
                 with c1:
-                    if media and os.path.exists(media) and not media.endswith((".mp4", ".mov")):
+                    if media and os.path.exists(media) and not media.lower().endswith((".mp4", ".mov", ".avi")):
                         if st.button("Seleccionar", key=f"sel_{post_id}", use_container_width=True):
                             st.session_state["ultima_captura_cuero"] = media
                             st.session_state["lote_pieles_activas"] = [media]
+                            with open(media, "rb") as f_sel:
+                                b_sel = f_sel.read()
+                            st.session_state["imagenes_def_memoria"] = [(os.path.basename(media), b_sel)]
+                            st.session_state["pieles_nesting_memoria"] = [(os.path.basename(media), b_sel)]
                             st.toast(f"'{tit}' seleccionada.")
                 with c2:
                     if st.button("Eliminar", key=f"del_{post_id}", use_container_width=True):
