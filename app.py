@@ -217,11 +217,10 @@ def ensamblar_plancha_completa(lista_imagenes_bytes):
             pass
 
     n = len(imgs_bgr)
-    # Factorización exacta para evitar cuadros vacíos (ej. 6 -> 3x2, 4 -> 2x2, 8 -> 4x2)
     mejores_dims = None
     for f_cand in range(1, int(math.sqrt(n)) + 1):
         if n % f_cand == 0:
-            mejores_dims = (f_cand, n // f_cand)  # (filas, cols) con cols >= filas
+            mejores_dims = (f_cand, n // f_cand)
     if mejores_dims:
         filas, cols = mejores_dims
     else:
@@ -279,11 +278,8 @@ st.markdown("""
         fill: #1f2421 !important;
     }
 
-    /* Textos generales sobre fondo crema: siempre oscuros y legibles */
+    /* Textos generales sobre fondo crema (excluyendo los cuadros de notificación/alerta) */
     .stApp h1, .stApp h2, .stApp h3, .stApp h4,
-    [data-testid="stMarkdownContainer"] p,
-    [data-testid="stMarkdownContainer"] li,
-    [data-testid="stMarkdownContainer"] strong,
     [data-testid="stWidgetLabel"] p,
     [data-testid="stWidgetLabel"] label,
     [data-testid="stCaptionContainer"] p,
@@ -295,24 +291,32 @@ st.markdown("""
     div[data-baseweb="checkbox"] label p {
         color: #1f2421 !important;
     }
+    div:not([role="alert"]):not([data-testid="stNotification"]):not([data-testid="stAlert"]) > [data-testid="stMarkdownContainer"] p,
+    div:not([role="alert"]):not([data-testid="stNotification"]):not([data-testid="stAlert"]) > [data-testid="stMarkdownContainer"] li,
+    div:not([role="alert"]):not([data-testid="stNotification"]):not([data-testid="stAlert"]) > [data-testid="stMarkdownContainer"] strong {
+        color: #1f2421 !important;
+    }
 
-    /* FIX CUADRO AZUL / ALERTAS (st.info, st.success, st.warning, st.error): fondo claro y letras oscuras siempre legibles */
-    [data-testid="stAlert"] {
-        background-color: #ffffff !important;
-        border: 1px solid #c7bdb0 !important;
-        border-left: 5px solid #2563eb !important;
+    /* CUADROS DE NOTIFICACIÓN / ALERTA (st.info, st.success, st.warning, st.error): fondo azul oscuro y letras BLANCAS */
+    [data-testid="stNotification"],
+    [data-testid="stAlert"],
+    div[role="alert"] {
+        background-color: #172554 !important;
+        border: 1px solid #1e3a8a !important;
+        border-left: 5px solid #3b82f6 !important;
         border-radius: 12px !important;
-        color: #1f2421 !important;
+        color: #ffffff !important;
     }
-    [data-testid="stAlert"] p,
-    [data-testid="stAlert"] span,
-    [data-testid="stAlert"] div,
-    [data-testid="stAlert"] strong {
-        color: #1f2421 !important;
+    [data-testid="stNotification"] *,
+    [data-testid="stAlert"] *,
+    div[role="alert"] * {
+        color: #ffffff !important;
     }
-    [data-testid="stAlert"] svg {
-        fill: #2563eb !important;
-        color: #2563eb !important;
+    [data-testid="stNotification"] svg,
+    [data-testid="stAlert"] svg,
+    div[role="alert"] svg {
+        fill: #93c5fd !important;
+        color: #93c5fd !important;
     }
 
     /* Bordes de contenedores limpios */
@@ -820,7 +824,6 @@ def aislar_piel_del_fondo(img_bgr):
     blur_sat = cv2.GaussianBlur(sat_ab, (15, 15), 0)
     _, mask_piel = cv2.threshold(blur_sat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # Si toda la imagen es cuero liso (sin mesa alrededor), usar el 100% de la plancha
     if np.mean(mask_piel == 255) < 0.12 or np.mean(mask_piel == 255) > 0.88:
         mask_completa = np.ones((h, w), dtype=np.uint8) * 255
         cv2.rectangle(mask_completa, (0, 0), (w, h), 0, 6)
@@ -1501,8 +1504,6 @@ elif opcion_menu == "Detección de Defectos":
                 post_id, _ = guardar_plancha_en_bd(b_pl, nom_nueva)
                 establecer_plancha_activa(b_pl, nom_nueva, post_id=post_id, info_extra=m_pl)
                 st.rerun()
-
-        imagenes_actuales = st.session_state.get("imagenes_def_memoria", [])
 
         m_def = st.columns(3)
         m_def[0].metric("Plancha", 1 if st.session_state.get("plancha_activa_bytes") else 0)
