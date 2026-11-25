@@ -32,9 +32,9 @@ EXTENSIONES_VIDEO = (".mp4", ".mov", ".avi", ".mkv", ".webm")
 # ------------------------------------------------------------------ Avisos con los colores exactos de la barra (100% legibles)
 def mostrar_aviso(texto, tipo="info"):
     estilos = {
-        "info": ("#16382b", "#ffffff", "#e67e22"),     # Verde bosque barra lateral + texto blanco + borde naranja
-        "success": ("#dff3e8", "#16382b", "#2e7d32"),  # Verde claro barra superior + texto verde oscuro
-        "error": ("#fee2e2", "#7f1d1d", "#dc2626"),    # Rojo suave + texto rojo oscuro
+        "info": ("#16382b", "#ffffff", "#e67e22"),
+        "success": ("#dff3e8", "#16382b", "#2e7d32"),
+        "error": ("#fee2e2", "#7f1d1d", "#dc2626"),
     }
     bg, fg, borde = estilos.get(tipo, estilos["info"])
     st.markdown(
@@ -208,7 +208,7 @@ def expandir_archivos_a_imagenes(lista_archivos):
             imagenes_listas.append((nom, b_data))
     return imagenes_listas
 
-# ------------------------------------------------------------------ Ensamblador Automático de Plancha (Sin huecos vacíos)
+# ------------------------------------------------------------------ Ensamblador Rectangular de Plancha Completa
 def ensamblar_plancha_completa(lista_imagenes_bytes):
     imgs_bgr = []
     for _, b_img in lista_imagenes_bytes:
@@ -243,19 +243,13 @@ def ensamblar_plancha_completa(lista_imagenes_bytes):
         except Exception:
             pass
 
+    # Cuadrícula rectangular completa (ej. 11 fotos -> 4 cols x 3 filas)
     n = len(imgs_bgr)
-    mejores_dims = None
-    for f_cand in range(1, int(math.sqrt(n)) + 1):
-        if n % f_cand == 0:
-            mejores_dims = (f_cand, n // f_cand)
-    if mejores_dims:
-        filas, cols = mejores_dims
-    else:
-        cols = math.ceil(math.sqrt(n * 1.35))
-        filas = math.ceil(n / cols)
+    cols = max(2, math.ceil(math.sqrt(n * 1.35)))
+    filas = max(1, math.ceil(n / cols))
 
-    sector_w = max(260, min(480, 1440 // cols))
-    sector_h = max(220, min(420, 1080 // filas))
+    sector_w = max(260, min(420, 1280 // cols))
+    sector_h = max(220, min(360, 960 // filas))
 
     muestra_centro = imgs_bgr[0][
         imgs_bgr[0].shape[0] // 4 : 3 * imgs_bgr[0].shape[0] // 4,
@@ -265,10 +259,15 @@ def ensamblar_plancha_completa(lista_imagenes_bytes):
 
     plancha = np.full((filas * sector_h, cols * sector_w, 3), color_base_piel, dtype=np.uint8)
 
-    for idx, im in enumerate(imgs_bgr):
+    total_celdas = filas * cols
+    for idx in range(total_celdas):
         r = idx // cols
         c = idx % cols
-        im_res = cv2.resize(im, (sector_w, sector_h), interpolation=cv2.INTER_AREA)
+        if idx < n:
+            im_src = imgs_bgr[idx]
+        else:
+            im_src = cv2.flip(imgs_bgr[(idx - 1) % n], 1)
+        im_res = cv2.resize(im_src, (sector_w, sector_h), interpolation=cv2.INTER_AREA)
         y1, y2 = r * sector_h, (r + 1) * sector_h
         x1, x2 = c * sector_w, (c + 1) * sector_w
         plancha[y1:y2, x1:x2] = im_res
@@ -788,6 +787,7 @@ def limpiar_plancha_activa():
         "resultado_nesting_plancha"
     ]:
         st.session_state.pop(clave, None)
+    st.session_state["plancha_borrada_manual"] = True
 
 def establecer_plancha_activa(bytes_plancha, nombre_plancha, post_id=None, info_extra=""):
     st.session_state["plancha_activa_bytes"] = bytes_plancha
@@ -797,11 +797,12 @@ def establecer_plancha_activa(bytes_plancha, nombre_plancha, post_id=None, info_
     st.session_state["plancha_completa_info"] = info_extra
     st.session_state["imagenes_def_memoria"] = [(f"{nombre_plancha}.jpg", bytes_plancha)]
     st.session_state["pieles_nesting_memoria"] = [(f"{nombre_plancha}.jpg", bytes_plancha)]
+    st.session_state["plancha_borrada_manual"] = False
     st.session_state.pop("resultado_plancha_defectos", None)
     st.session_state.pop("resultado_nesting_plancha", None)
 
 def cargar_ultima_plancha_si_no_hay():
-    if "plancha_activa_bytes" not in st.session_state:
+    if "plancha_activa_bytes" not in st.session_state and not st.session_state.get("plancha_borrada_manual", False):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("SELECT id, titulo, media_path FROM feed ORDER BY id DESC LIMIT 1")
@@ -1415,7 +1416,7 @@ if opcion_menu == "Captura del Cuero":
         nom_act = st.session_state.get("plancha_activa_nombre", "Plancha activa")
         mostrar_aviso(f"Plancha guardada y lista en '2. Defectos': {nom_act}", "success")
         st.image(st.session_state["plancha_activa_bytes"], caption=f"Plancha activa: {nom_act}", use_container_width=True)
-        if st.button("Borrar plancha activa para subir otra", use_container_width=True):
+        if st.button("Borrar plancha activa para subir otra", key="btn_borrar_activa_p1", use_container_width=True):
             limpiar_plancha_activa()
             st.rerun()
 
@@ -1481,7 +1482,7 @@ elif opcion_menu == "Detección de Defectos":
         if plancha_bytes:
             mostrar_aviso(f"Plancha lista: {plancha_nombre}", "success")
             st.image(plancha_bytes, caption=plancha_nombre, use_container_width=True)
-            if st.button("Borrar / Cambiar esta plancha", use_container_width=True):
+            if st.button("Borrar / Cambiar esta plancha", key="btn_borrar_activa_p2", use_container_width=True):
                 limpiar_plancha_activa()
                 st.rerun()
         else:
@@ -1566,7 +1567,7 @@ elif opcion_menu == "Acomodo de Moldes":
         if plancha_bytes:
             mostrar_aviso(f"Plancha activa: {plancha_nombre}", "success")
             st.image(plancha_bytes, caption=plancha_nombre, use_container_width=True)
-            if st.button("Borrar / Cambiar plancha", use_container_width=True):
+            if st.button("Borrar / Cambiar plancha", key="btn_borrar_activa_p3", use_container_width=True):
                 limpiar_plancha_activa()
                 st.rerun()
         else:
