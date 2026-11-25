@@ -243,7 +243,6 @@ def ensamblar_plancha_completa(lista_imagenes_bytes):
         except Exception:
             pass
 
-    # Cuadrícula rectangular completa (ej. 11 fotos -> 4 cols x 3 filas)
     n = len(imgs_bgr)
     cols = max(2, math.ceil(math.sqrt(n * 1.35)))
     filas = max(1, math.ceil(n / cols))
@@ -313,8 +312,21 @@ st.markdown("""
     [data-testid="stMetricLabel"] label,
     [data-testid="stMetricLabel"] div,
     [data-testid="stMetricValue"] div,
-    div[data-baseweb="radio"] label p,
-    div[data-baseweb="checkbox"] label p {
+    [data-testid="stMain"] div[data-baseweb="radio"] label,
+    [data-testid="stMain"] div[data-baseweb="radio"] label p,
+    [data-testid="stMain"] div[data-baseweb="radio"] label div,
+    [data-testid="stMain"] div[data-baseweb="radio"] label span,
+    [data-testid="stMain"] [data-testid="stRadio"] label,
+    [data-testid="stMain"] [data-testid="stRadio"] label p,
+    [data-testid="stMain"] [data-testid="stRadio"] label div,
+    [data-testid="stMain"] [data-testid="stRadio"] label span,
+    [data-testid="stMain"] div[data-baseweb="checkbox"] label,
+    [data-testid="stMain"] div[data-baseweb="checkbox"] label p,
+    [data-testid="stMain"] div[data-baseweb="checkbox"] label div,
+    [data-testid="stMain"] div[data-baseweb="checkbox"] label span,
+    [data-testid="stExpander"] summary,
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] summary span {
         color: #1f2421 !important;
     }
 
