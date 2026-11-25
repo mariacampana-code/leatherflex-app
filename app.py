@@ -1,7 +1,6 @@
-"""Leather-Flex 3D - Acomodo Automático de Moldes y Hoja Imprimible de Taller"""
+"""Leather-Flex 3D - Flujo Directo: 1. Captura -> 2. Defectos -> 3. Acomodo e Impresión -> 4. Catálogo"""
 import os
 import math
-import json
 import sqlite3
 import tempfile
 import shutil
@@ -17,8 +16,7 @@ try:
 except ImportError:
     SKLEARN_DISPONIBLE = False
 
-from leatherflex import calibracion, pipeline, acomodo, simulador
-from leatherflex.config import Config
+from leatherflex import simulador
 
 # ------------------------------------------------------------------ Configuración de página
 st.set_page_config(
@@ -1055,7 +1053,7 @@ def guardar_captura_en_bd(nombre_archivo, bytes_data, nota):
     st.session_state["ultima_captura_cuero"] = ruta_guardada
     return ruta_guardada
 
-# ------------------------------------------------------------------ Barra Lateral
+# ------------------------------------------------------------------ Barra Lateral (4 Pasos Limpios)
 with st.sidebar:
     st.markdown("""
         <div class="brand-container">
@@ -1066,30 +1064,205 @@ with st.sidebar:
     opcion_menu = st.radio(
         "Navegacion",
         [
-            "Acomodo de Moldes",
             "Captura del Cuero",
             "Detección de Defectos",
-            "Catálogo de Moldes",
-            "Calibración de Escáner"
+            "Acomodo de Moldes",
+            "Catálogo de Moldes"
         ],
         label_visibility="collapsed"
     )
 
-ruta_cal = os.path.join(TMP, "calib.json")
-if not os.path.exists(ruta_cal):
-    with open(ruta_cal, "w") as f:
-        json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
+# ================================================================== PASO 1: CAPTURA DEL CUERO
+if opcion_menu == "Captura del Cuero":
+    st.title("1. Captura del Cuero")
+    st.caption("Sube la foto (o varias fotos) de la plancha de cuero para analizarla.")
 
-# ================================================================== MÓDULO PRINCIPAL: ACOMODO AUTOMÁTICO E IMPRESIÓN
-if opcion_menu == "Acomodo de Moldes":
-    st.title("Acomodo de Moldes y Hoja Imprimible")
-    st.caption("Sube la foto del cuero, elige tus moldes y obtén al instante la hoja lista para imprimir y cortar.")
+    if "bandeja_capturas" not in st.session_state:
+        st.session_state["bandeja_capturas"] = []
+    if "uploader_key" not in st.session_state:
+        st.session_state["uploader_key"] = 0
+
+    with st.container(border=True):
+        nota_lote = st.text_input("Nombre de la Plancha (Opcional)", placeholder="Ej. Cuero Vacuno Marrón #1", key="nota_unica")
+
+        archivos_nuevos = st.file_uploader(
+            "Seleccionar fotos o videos de la plancha",
+            type=["jpg", "png", "jpeg", "webp", "mp4", "mov", "avi", "mkv"],
+            accept_multiple_files=True,
+            key=f"uploader_unico_{st.session_state['uploader_key']}"
+        )
+
+        if archivos_nuevos:
+            for arch in archivos_nuevos:
+                st.session_state["bandeja_capturas"].append((arch.name, arch.getvalue()))
+            st.session_state["uploader_key"] += 1
+            st.rerun()
+
+        bandeja = st.session_state["bandeja_capturas"]
+
+        if bandeja:
+            st.markdown(f"**Tomas cargadas ({len(bandeja)}):**")
+            cols_prev = st.columns(4)
+            for idx_p, (nom_p, bytes_p) in enumerate(bandeja):
+                with cols_prev[idx_p % 4]:
+                    if nom_p.lower().endswith(EXTENSIONES_VIDEO):
+                        st.video(bytes_p)
+                    else:
+                        st.image(bytes_p, caption=nom_p, use_container_width=True)
+
+            col_g1, col_g2 = st.columns([3, 1])
+            with col_g1:
+                if st.button(f"Guardar Plancha ({len(bandeja)} toma/s)", type="primary", use_container_width=True):
+                    rutas_lote = []
+                    for idx, (nom_item, bytes_item) in enumerate(bandeja):
+                        etiqueta = f"{nota_lote} - Toma #{idx+1}" if nota_lote else f"Toma #{idx+1} ({nom_item})"
+                        ruta_g = guardar_captura_en_bd(nom_item, bytes_item, etiqueta)
+                        rutas_lote.append(ruta_g)
+
+                    imagenes_memoria = expandir_archivos_a_imagenes(bandeja)
+                    bytes_plancha, msg_plancha = ensamblar_plancha_completa(imagenes_memoria)
+
+                    if imagenes_memoria:
+                        st.session_state["lote_pieles_activas"] = rutas_lote
+                        st.session_state["imagenes_def_memoria"] = imagenes_memoria
+                        st.session_state["pieles_nesting_memoria"] = imagenes_memoria
+                    if bytes_plancha:
+                        st.session_state["plancha_completa_bytes"] = bytes_plancha
+                        st.session_state["plancha_completa_info"] = msg_plancha
+
+                    st.session_state["bandeja_capturas"] = []
+                    st.session_state["uploader_key"] += 1
+                    st.success("Plancha guardada. Ya puedes pasar a 'Detección de Defectos'.")
+                    st.rerun()
+
+            with col_g2:
+                if st.button("Limpiar", use_container_width=True):
+                    st.session_state["bandeja_capturas"] = []
+                    st.session_state["uploader_key"] += 1
+                    st.rerun()
+
+    st.write("---")
+    st.subheader("Planchas Guardadas")
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, usuario, titulo, fecha, media_path FROM feed ORDER BY id DESC")
+    posts = c.fetchall()
+    conn.close()
+
+    if not posts:
+        st.info("No hay capturas aún.")
+    else:
+        cols_hist = st.columns(3)
+        for idx, p in enumerate(posts):
+            post_id, usr, tit, fecha, media = p
+            with cols_hist[idx % 3]:
+                st.markdown(f"<div class='feed-card'><small>{fecha}</small><br><b>{tit}</b></div>", unsafe_allow_html=True)
+                if media and os.path.exists(media):
+                    if media.lower().endswith(EXTENSIONES_VIDEO):
+                        st.video(media)
+                    else:
+                        st.image(media, use_container_width=True)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if media and os.path.exists(media):
+                        if st.button("Usar esta plancha", key=f"sel_{post_id}", use_container_width=True):
+                            with open(media, "rb") as f_sel:
+                                b_sel = f_sel.read()
+                            imgs_sel = expandir_archivos_a_imagenes([(os.path.basename(media), b_sel)])
+                            st.session_state["imagenes_def_memoria"] = imgs_sel
+                            st.session_state["pieles_nesting_memoria"] = imgs_sel
+                            st.toast(f"'{tit}' seleccionada. Pasa a 'Detección de Defectos'.")
+                with c2:
+                    if st.button("Eliminar", key=f"del_{post_id}", use_container_width=True):
+                        conn = sqlite3.connect(DB_PATH)
+                        c = conn.cursor()
+                        c.execute("DELETE FROM feed WHERE id = ?", (post_id,))
+                        conn.commit()
+                        conn.close()
+                        if media and os.path.exists(media):
+                            try:
+                                os.remove(media)
+                            except Exception:
+                                pass
+                        st.rerun()
+
+# ================================================================== PASO 2: DETECCIÓN DE DEFECTOS
+elif opcion_menu == "Detección de Defectos":
+    st.title("2. Detección de Defectos")
+    st.caption("Marca en rojo las zonas dañadas (rayones, manchas, huecos) que deben evitarse al cortar.")
+
+    col1, col2 = st.columns([1, 1.35])
+    with col1:
+        archivos_subidos = st.file_uploader(
+            "Foto de la plancha (ya cargada desde Captura, o sube otra aquí)",
+            type=["jpg", "jpeg", "png", "webp", "mp4", "mov", "avi", "mkv"],
+            accept_multiple_files=True,
+            key="uploader_defectos_lote"
+        )
+
+        if archivos_subidos:
+            raw_files = [(f.name, f.getvalue()) for f in archivos_subidos]
+            imgs_exp = expandir_archivos_a_imagenes(raw_files)
+            st.session_state["imagenes_def_memoria"] = imgs_exp
+            st.session_state["pieles_nesting_memoria"] = imgs_exp
+
+        imagenes_actuales = st.session_state.get("imagenes_def_memoria", [])
+
+        if imagenes_actuales:
+            st.success(f"Plancha lista ({len(imagenes_actuales)} toma/s cargada/s).")
+
+        with st.expander("Ajuste de sensibilidad (opcional)"):
+            sensibilidad = st.slider("Sensibilidad de detección", 20, 100, 75, 5)
+
+        btn_analizar = st.button(
+            "Detectar Defectos en Rojo",
+            type="primary",
+            use_container_width=True,
+            disabled=(len(imagenes_actuales) == 0)
+        )
+
+    with col2:
+        if btn_analizar and imagenes_actuales:
+            with st.spinner("Analizando superficie del cuero..."):
+                bytes_plancha, info_ensamble = ensamblar_plancha_completa(imagenes_actuales)
+                img_viz_rgb, obst, rep, err = detectar_defectos_cuero(bytes_plancha, sensibilidad=sensibilidad)
+                st.session_state["resultado_plancha_defectos"] = {
+                    "info_ensamble": info_ensamble,
+                    "img_viz": img_viz_rgb,
+                    "reporte": rep,
+                    "error": err
+                }
+
+        res_plancha = st.session_state.get("resultado_plancha_defectos")
+        if res_plancha:
+            if res_plancha["error"]:
+                st.error(res_plancha["error"])
+            else:
+                st.success(f"Se encontraron **{len(res_plancha['reporte'])} defectos** marcados en rojo. Ya puedes ir a 'Acomodo de Moldes'.")
+                st.image(res_plancha["img_viz"], use_container_width=True)
+                if res_plancha["reporte"]:
+                    st.dataframe(
+                        [{
+                            "N°": f"D{d['id']}",
+                            "Tipo de Defecto": d["tipo"],
+                            "Ubicación": d["ubicacion"]
+                        } for d in res_plancha["reporte"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+        else:
+            st.info("Presiona 'Detectar Defectos en Rojo' para revisar la plancha capturada.")
+
+# ================================================================== PASO 3: ACOMODO DE MOLDES Y HOJA IMPRIMIBLE
+elif opcion_menu == "Acomodo de Moldes":
+    st.title("3. Acomodo de Moldes y Hoja Imprimible")
+    st.caption("Elige tus moldes y obtén la hoja lista para imprimir y que el marroquinero corte sin errores.")
 
     col_a, col_b = st.columns([1, 1])
     with col_a:
-        st.subheader("1. Foto del Cuero")
+        st.subheader("Plancha de Cuero")
         fotos_nest = st.file_uploader(
-            "Sube la foto (o varias fotos) de tu plancha de cuero",
+            "Plancha cargada (o sube otra foto aquí)",
             type=["jpg", "jpeg", "png", "webp", "mp4", "mov", "avi", "mkv"],
             accept_multiple_files=True,
             key="uploader_nesting_multi"
@@ -1104,7 +1277,7 @@ if opcion_menu == "Acomodo de Moldes":
 
         pieles_nest = st.session_state.get("pieles_nesting_memoria", [])
         if pieles_nest:
-            st.success(f"Cuero listo ({len(pieles_nest)} toma cargada).")
+            st.success(f"Plancha lista ({len(pieles_nest)} toma/s).")
             st.image(pieles_nest[0][1], caption="Vista previa de la plancha", use_container_width=True)
         else:
             if st.button("Probar con un Cuero de Ejemplo (Demo)", use_container_width=True):
@@ -1119,7 +1292,7 @@ if opcion_menu == "Acomodo de Moldes":
                 st.rerun()
 
     with col_b:
-        st.subheader("2. Elige los Moldes")
+        st.subheader("Elige los Moldes")
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("SELECT id, nombre, cliente, dimensiones, archivo_dxf FROM moldes ORDER BY id ASC")
@@ -1148,8 +1321,7 @@ if opcion_menu == "Acomodo de Moldes":
                 nom_real, path_dxf = mapa_dxf[item_nom]
                 moldes_seleccionados.append({"nombre": nom_real, "cantidad": 1, "dxf_path": path_dxf})
 
-        # Ajustes ocultos por defecto para no confundir; todo en automático
-        with st.expander("Ajustes opcionales (si quieres cambiar tamaños o cantidades)"):
+        with st.expander("Ajustes opcionales"):
             llenar_toda = st.checkbox(
                 "Llenar toda la plancha automáticamente con los moldes elegidos",
                 value=True
@@ -1161,7 +1333,7 @@ if opcion_menu == "Acomodo de Moldes":
     st.write("---")
     puede_procesar = len(pieles_nest) > 0 and len(moldes_seleccionados) > 0
     if st.button("Acomodar de la Mejor Manera y Preparar Hoja Imprimible", type="primary", use_container_width=True, disabled=not puede_procesar):
-        with st.spinner("Buscando defectos y calculando el mejor acomodo para aprovechar toda la piel..."):
+        with st.spinner("Calculando el mejor acomodo y preparando la hoja imprimible..."):
             bytes_plancha_entera, info_ensamble = ensamblar_plancha_completa(pieles_nest)
             _, obst, rep_def, err = detectar_defectos_cuero(bytes_plancha_entera, sensibilidad=sens_nest)
 
@@ -1253,187 +1425,9 @@ if opcion_menu == "Acomodo de Moldes":
                 with st.expander("Ver lista detallada de las piezas ubicadas"):
                     st.dataframe(rn["colocadas"], use_container_width=True, hide_index=True)
 
-# ================================================================== MÓDULO 2: CAPTURA DEL CUERO
-elif opcion_menu == "Captura del Cuero":
-    st.title("Captura del Cuero")
-    st.caption("Guarda tus fotos de planchas de cuero para usarlas después en el acomodo.")
-
-    if "bandeja_capturas" not in st.session_state:
-        st.session_state["bandeja_capturas"] = []
-    if "uploader_key" not in st.session_state:
-        st.session_state["uploader_key"] = 0
-
-    with st.container(border=True):
-        nota_lote = st.text_input("Nombre de la Plancha (Opcional)", placeholder="Ej. Cuero Vacuno Marrón #1", key="nota_unica")
-
-        archivos_nuevos = st.file_uploader(
-            "Seleccionar fotos o videos de la plancha",
-            type=["jpg", "png", "jpeg", "webp", "mp4", "mov", "avi", "mkv"],
-            accept_multiple_files=True,
-            key=f"uploader_unico_{st.session_state['uploader_key']}"
-        )
-
-        if archivos_nuevos:
-            for arch in archivos_nuevos:
-                st.session_state["bandeja_capturas"].append((arch.name, arch.getvalue()))
-            st.session_state["uploader_key"] += 1
-            st.rerun()
-
-        bandeja = st.session_state["bandeja_capturas"]
-
-        if bandeja:
-            st.markdown(f"**Tomas cargadas ({len(bandeja)}):**")
-            cols_prev = st.columns(4)
-            for idx_p, (nom_p, bytes_p) in enumerate(bandeja):
-                with cols_prev[idx_p % 4]:
-                    if nom_p.lower().endswith(EXTENSIONES_VIDEO):
-                        st.video(bytes_p)
-                    else:
-                        st.image(bytes_p, caption=nom_p, use_container_width=True)
-
-            col_g1, col_g2 = st.columns([3, 1])
-            with col_g1:
-                if st.button(f"Guardar Plancha ({len(bandeja)} toma/s)", type="primary", use_container_width=True):
-                    rutas_lote = []
-                    for idx, (nom_item, bytes_item) in enumerate(bandeja):
-                        etiqueta = f"{nota_lote} - Toma #{idx+1}" if nota_lote else f"Toma #{idx+1} ({nom_item})"
-                        ruta_g = guardar_captura_en_bd(nom_item, bytes_item, etiqueta)
-                        rutas_lote.append(ruta_g)
-
-                    imagenes_memoria = expandir_archivos_a_imagenes(bandeja)
-                    bytes_plancha, msg_plancha = ensamblar_plancha_completa(imagenes_memoria)
-
-                    if imagenes_memoria:
-                        st.session_state["lote_pieles_activas"] = rutas_lote
-                        st.session_state["imagenes_def_memoria"] = imagenes_memoria
-                        st.session_state["pieles_nesting_memoria"] = imagenes_memoria
-                    if bytes_plancha:
-                        st.session_state["plancha_completa_bytes"] = bytes_plancha
-                        st.session_state["plancha_completa_info"] = msg_plancha
-
-                    st.session_state["bandeja_capturas"] = []
-                    st.session_state["uploader_key"] += 1
-                    st.success("Plancha guardada y lista para acomodar moldes.")
-                    st.rerun()
-
-            with col_g2:
-                if st.button("Limpiar", use_container_width=True):
-                    st.session_state["bandeja_capturas"] = []
-                    st.session_state["uploader_key"] += 1
-                    st.rerun()
-
-    st.write("---")
-    st.subheader("Planchas Guardadas")
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT id, usuario, titulo, fecha, media_path FROM feed ORDER BY id DESC")
-    posts = c.fetchall()
-    conn.close()
-
-    if not posts:
-        st.info("No hay capturas aún.")
-    else:
-        cols_hist = st.columns(3)
-        for idx, p in enumerate(posts):
-            post_id, usr, tit, fecha, media = p
-            with cols_hist[idx % 3]:
-                st.markdown(f"<div class='feed-card'><small>{fecha}</small><br><b>{tit}</b></div>", unsafe_allow_html=True)
-                if media and os.path.exists(media):
-                    if media.lower().endswith(EXTENSIONES_VIDEO):
-                        st.video(media)
-                    else:
-                        st.image(media, use_container_width=True)
-                c1, c2 = st.columns(2)
-                with c1:
-                    if media and os.path.exists(media):
-                        if st.button("Usar esta plancha", key=f"sel_{post_id}", use_container_width=True):
-                            with open(media, "rb") as f_sel:
-                                b_sel = f_sel.read()
-                            imgs_sel = expandir_archivos_a_imagenes([(os.path.basename(media), b_sel)])
-                            st.session_state["imagenes_def_memoria"] = imgs_sel
-                            st.session_state["pieles_nesting_memoria"] = imgs_sel
-                            st.toast(f"'{tit}' lista en Acomodo de Moldes.")
-                with c2:
-                    if st.button("Eliminar", key=f"del_{post_id}", use_container_width=True):
-                        conn = sqlite3.connect(DB_PATH)
-                        c = conn.cursor()
-                        c.execute("DELETE FROM feed WHERE id = ?", (post_id,))
-                        conn.commit()
-                        conn.close()
-                        if media and os.path.exists(media):
-                            try:
-                                os.remove(media)
-                            except Exception:
-                                pass
-                        st.rerun()
-
-# ================================================================== MÓDULO 3: DETECCIÓN DE DEFECTOS
-elif opcion_menu == "Detección de Defectos":
-    st.title("Revisión de Defectos en el Cuero")
-    st.caption("Marca en rojo las zonas dañadas (rayones, manchas, huecos) que deben evitarse al cortar.")
-
-    col1, col2 = st.columns([1, 1.35])
-    with col1:
-        archivos_subidos = st.file_uploader(
-            "Sube la foto de la plancha de cuero",
-            type=["jpg", "jpeg", "png", "webp", "mp4", "mov", "avi", "mkv"],
-            accept_multiple_files=True,
-            key="uploader_defectos_lote"
-        )
-
-        if archivos_subidos:
-            raw_files = [(f.name, f.getvalue()) for f in archivos_subidos]
-            imgs_exp = expandir_archivos_a_imagenes(raw_files)
-            st.session_state["imagenes_def_memoria"] = imgs_exp
-            st.session_state["pieles_nesting_memoria"] = imgs_exp
-
-        imagenes_actuales = st.session_state.get("imagenes_def_memoria", [])
-
-        with st.expander("Ajuste de sensibilidad (opcional)"):
-            sensibilidad = st.slider("Sensibilidad de detección", 20, 100, 75, 5)
-
-        btn_analizar = st.button(
-            "Detectar Defectos en Rojo",
-            type="primary",
-            use_container_width=True,
-            disabled=(len(imagenes_actuales) == 0)
-        )
-
-    with col2:
-        if btn_analizar and imagenes_actuales:
-            with st.spinner("Analizando superficie del cuero..."):
-                bytes_plancha, info_ensamble = ensamblar_plancha_completa(imagenes_actuales)
-                img_viz_rgb, obst, rep, err = detectar_defectos_cuero(bytes_plancha, sensibilidad=sensibilidad)
-                st.session_state["resultado_plancha_defectos"] = {
-                    "info_ensamble": info_ensamble,
-                    "img_viz": img_viz_rgb,
-                    "reporte": rep,
-                    "error": err
-                }
-
-        res_plancha = st.session_state.get("resultado_plancha_defectos")
-        if res_plancha:
-            if res_plancha["error"]:
-                st.error(res_plancha["error"])
-            else:
-                st.success(f"Se encontraron **{len(res_plancha['reporte'])} defectos** marcados en rojo.")
-                st.image(res_plancha["img_viz"], use_container_width=True)
-                if res_plancha["reporte"]:
-                    st.dataframe(
-                        [{
-                            "N°": f"D{d['id']}",
-                            "Tipo de Defecto": d["tipo"],
-                            "Ubicación": d["ubicacion"]
-                        } for d in res_plancha["reporte"]],
-                        use_container_width=True,
-                        hide_index=True
-                    )
-        else:
-            st.info("Sube una foto del cuero y presiona el botón para revisar sus defectos.")
-
-# ================================================================== MÓDULO 4: CATÁLOGO DE MOLDES + FOTO -> DXF
+# ================================================================== PASO 4: CATÁLOGO DE MOLDES + FOTO -> DXF
 elif opcion_menu == "Catálogo de Moldes":
-    st.title("Catálogo Digital de Moldes")
+    st.title("4. Catálogo Digital de Moldes")
     st.caption("Sube fotos de tus moldes físicos para convertirlos a DXF, o usa nuestros moldes de Calzado, Cartera y Casaca.")
 
     with st.container(border=True):
@@ -1556,7 +1550,7 @@ elif opcion_menu == "Catálogo de Moldes":
                     lienzo_m = np.ones((360, 320, 3), dtype=np.uint8) * 255
                     for gx in range(0, 320, 40):
                         cv2.line(lienzo_m, (gx, 0), (gx, 360), (235, 235, 235), 1)
-                    for gy in range(0, 360, 40):
+                    for gy in range(0, 320, 40):
                         cv2.line(lienzo_m, (0, gy), (320, gy), (235, 235, 235), 1)
 
                     min_xy = np.min(pts_molde, axis=0)
@@ -1600,30 +1594,3 @@ elif opcion_menu == "Catálogo de Moldes":
                             conn.commit()
                             conn.close()
                             st.rerun()
-
-# ================================================================== MÓDULO 5: CALIBRACIÓN DE ESCÁNER
-elif opcion_menu == "Calibración de Escáner":
-    st.title("Calibración de Escáner")
-    st.caption("Ajusta la escala real en milímetros si vas a tomar fotos desde una cámara fija en la mesa.")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        ruta_tab = os.path.join(TMP, "tablero_para_imprimir.png")
-        if not os.path.exists(ruta_tab):
-            calibracion.tablero_para_imprimir(ruta_tab)
-        st.download_button("Descargar Tablero de Calibración (PNG)", open(ruta_tab, "rb"), "tablero_calibracion.png", "image/png")
-        f_tab = st.file_uploader("Subir foto del tablero en mesa", key="tab")
-        f_bla = st.file_uploader("Hoja blanca para compensación (opcional)", key="bla")
-
-    with col2:
-        cfg = Config()
-        cfg.umbral_sigma = st.slider("Sensibilidad Óptica Base", 2.0, 5.0, cfg.umbral_sigma, 0.1)
-
-    if f_tab and st.button("Guardar Calibración", type="primary"):
-        try:
-            cal = calibracion.calibrar_tablero(cv2.imdecode(np.frombuffer(f_tab.getbuffer(), np.uint8), cv2.IMREAD_COLOR))
-            gan = calibracion.campo_plano(cv2.imdecode(np.frombuffer(f_bla.getbuffer(), np.uint8), cv2.IMREAD_COLOR)) if f_bla else None
-            calibracion.guardar(cal, gan, ruta_cal)
-            st.success("Escáner calibrado correctamente.")
-        except Exception as e:
-            st.error(f"Error durante la calibración: {e}")
