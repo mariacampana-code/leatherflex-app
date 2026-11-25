@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Ensamblaje de Plancha Completa (Mosaico/Stitching), IA de Defectos y Nesting Integral"""
+"""Leather-Flex 3D - Ensamblaje de Plancha Completa, IA de Defectos, Digitalizador Foto->DXF y Catálogo Integral"""
 import os
 import math
 import json
@@ -177,15 +177,8 @@ def expandir_archivos_a_imagenes(lista_archivos):
             imagenes_listas.append((nom, b_data))
     return imagenes_listas
 
-# ------------------------------------------------------------------ Ensamblador de Plancha Completa de Cuero (Mosaico + Stitching)
+# ------------------------------------------------------------------ Ensamblador de Plancha Completa de Cuero
 def ensamblar_plancha_completa(lista_imagenes_bytes, columnas_cuadricula=0):
-    """
-    Une múltiples fotos parciales de una plancha de cuero en UNA SOLA PLANCHA ENTERA.
-    - Si las fotos tienen solapamiento óptico (panorámica), intenta OpenCV Stitcher.
-    - Si son tomas en cuadrícula/sectores (como 3x4 = 12 fotos o cualquier cantidad N),
-      las ensambla limpiamente en una única plancha unificada sin bordes divisorios
-      para que la IA detecte defectos y acomode los moldes sobre toda la superficie.
-    """
     imgs_bgr = []
     for _, b_img in lista_imagenes_bytes:
         arr = np.frombuffer(b_img, np.uint8)
@@ -205,7 +198,6 @@ def ensamblar_plancha_completa(lista_imagenes_bytes, columnas_cuadricula=0):
         ok, buf = cv2.imencode(".jpg", im_unica, [int(cv2.IMWRITE_JPEG_QUALITY), 94])
         return buf.tobytes(), f"Plancha individual cargada ({im_unica.shape[1]}x{im_unica.shape[0]} px)"
 
-    # Intento 1: Panorámica automática por puntos clave si hay solapamiento directo (<= 8 fotos)
     if columnas_cuadricula == 0 and 2 <= len(imgs_bgr) <= 8:
         try:
             stitcher = cv2.Stitcher_create(cv2.Stitcher_SCANS)
@@ -220,20 +212,16 @@ def ensamblar_plancha_completa(lista_imagenes_bytes, columnas_cuadricula=0):
         except Exception:
             pass
 
-    # Intento 2: Ensamblaje de Plancha Completa en Cuadrícula Continua (para N fotos: 4, 6, 9, 12, etc.)
     n = len(imgs_bgr)
     if columnas_cuadricula > 0:
         cols = columnas_cuadricula
     else:
-        # Proporción horizontal natural de plancha de cuero (ej. 12 fotos -> 4 cols x 3 filas)
         cols = math.ceil(math.sqrt(n * 1.35))
     filas = math.ceil(n / cols)
 
-    # Normalizar tamaño de cada sector para unión limpia y uniforme
     sector_w = max(240, min(480, 1440 // cols))
     sector_h = max(200, min(400, 1080 // filas))
 
-    # Color medio del cuero para rellenar espacios vacíos si N no llena el rectángulo exacto
     muestra_centro = imgs_bgr[0][
         imgs_bgr[0].shape[0] // 4 : 3 * imgs_bgr[0].shape[0] // 4,
         imgs_bgr[0].shape[1] // 4 : 3 * imgs_bgr[0].shape[1] // 4
@@ -250,7 +238,6 @@ def ensamblar_plancha_completa(lista_imagenes_bytes, columnas_cuadricula=0):
         x1, x2 = c * sector_w, (c + 1) * sector_w
         plancha[y1:y2, x1:x2] = im_res
 
-    # Suavizar sutilmente las uniones entre sectores para evitar falsas líneas de costura
     for c in range(1, cols):
         x_seam = c * sector_w
         x_a, x_b = max(0, x_seam - 4), min(plancha.shape[1], x_seam + 4)
@@ -322,7 +309,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------------------------------------------------------ Geometría Curva de Moldes
+# ------------------------------------------------------------------ Geometría Curva de Moldes (Calzado, Cartera, Casaca y DXF)
 def suavizar_contorno(puntos, num_puntos=100):
     pts = np.array(puntos, dtype=np.float32)
     pts = np.vstack([pts, pts[0]])
@@ -334,9 +321,47 @@ def suavizar_contorno(puntos, num_puntos=100):
     y_smooth = cv2.GaussianBlur(y_smooth.astype(np.float32), (5, 1), 0).ravel()
     return np.column_stack([x_smooth, y_smooth]).astype(np.int32)
 
-def obtener_puntos_molde_calzado(tipo):
+def leer_puntos_desde_dxf(ruta_dxf):
+    """Lee vértices POLYLINE de un archivo DXF guardado en el catálogo."""
+    if not ruta_dxf or not os.path.exists(ruta_dxf):
+        return None
+    try:
+        with open(ruta_dxf, "r", encoding="utf-8", errors="ignore") as f:
+            lines = [line.strip() for line in f.readlines()]
+        pts = []
+        i = 0
+        while i < len(lines) - 1:
+            if lines[i] == "VERTEX":
+                x, y = None, None
+                j = i + 1
+                while j < len(lines) - 1 and lines[j] != "0":
+                    if lines[j] == "10":
+                        x = float(lines[j + 1])
+                    elif lines[j] == "20":
+                        y = float(lines[j + 1])
+                    j += 2
+                if x is not None and y is not None:
+                    pts.append([int(round(x)), int(round(y))])
+                i = j
+            else:
+                i += 1
+        if len(pts) >= 3:
+            return np.array(pts, dtype=np.int32)
+    except Exception:
+        pass
+    return None
+
+def obtener_puntos_molde(tipo, ruta_dxf=None):
+    """Retorna el contorno vectorial del molde (Calzado, Cartera, Casaca o DXF digitalizado)."""
+    if ruta_dxf:
+        pts_dxf = leer_puntos_desde_dxf(ruta_dxf)
+        if pts_dxf is not None and len(pts_dxf) >= 3:
+            return pts_dxf
+
     tipo_l = tipo.lower()
-    if "frente" in tipo_l:
+
+    # --- CALZADO ---
+    if "frente" in tipo_l or "capellada" in tipo_l:
         pts = [
             [20, 0], [70, 35], [120, 45], [170, 35], [220, 0],
             [235, 40], [215, 105], [170, 135], [120, 120], [70, 135],
@@ -364,7 +389,121 @@ def obtener_puntos_molde_calzado(tipo):
             [10, 270], [15, 210], [0, 160], [5, 100], [15, 45]
         ]
         return suavizar_contorno(pts, 100)
+
+    # --- CARTERA / BOLSO ---
+    elif "cuerpo principal" in tipo_l or ("cartera" in tipo_l and "cuerpo" in tipo_l):
+        pts = [
+            [20, 0], [240, 0], [260, 25], [250, 180],
+            [225, 205], [35, 205], [10, 180], [0, 25]
+        ]
+        return suavizar_contorno(pts, 90)
+    elif "solapa" in tipo_l:
+        pts = [
+            [0, 0], [220, 0], [215, 75], [175, 115],
+            [110, 130], [45, 115], [5, 75]
+        ]
+        return suavizar_contorno(pts, 80)
+    elif "fuelle" in tipo_l:
+        pts = [
+            [15, 0], [65, 0], [78, 35], [70, 155],
+            [55, 185], [25, 185], [10, 155], [2, 35]
+        ]
+        return suavizar_contorno(pts, 70)
+    elif "asa" in tipo_l or "correa" in tipo_l:
+        pts = [
+            [10, 0], [260, 0], [270, 14], [260, 28],
+            [10, 28], [0, 14]
+        ]
+        return suavizar_contorno(pts, 60)
+
+    # --- CASACA / CHAQUETA ---
+    elif "pechera" in tipo_l or "delantera" in tipo_l:
+        pts = [
+            [45, 0], [115, 18], [155, 75], [145, 145],
+            [155, 285], [15, 285], [15, 55], [30, 15]
+        ]
+        return suavizar_contorno(pts, 100)
+    elif "espalda" in tipo_l:
+        pts = [
+            [55, 10], [120, 0], [185, 10], [225, 50],
+            [200, 120], [210, 275], [30, 275], [40, 120], [15, 50]
+        ]
+        return suavizar_contorno(pts, 110)
+    elif "manga" in tipo_l:
+        pts = [
+            [45, 0], [85, 15], [115, 65], [100, 185],
+            [88, 280], [28, 280], [15, 185], [0, 65], [20, 15]
+        ]
+        return suavizar_contorno(pts, 90)
+    elif "cuello" in tipo_l:
+        pts = [
+            [20, 15], [110, 0], [200, 15], [215, 55],
+            [160, 48], [110, 45], [60, 48], [5, 55]
+        ]
+        return suavizar_contorno(pts, 70)
+
     return np.array([[0, 0], [160, 0], [150, 90], [10, 90]], np.int32)
+
+def vectorizar_foto_molde_a_dxf(bytes_imagen, ancho_real_mm=220):
+    """
+    Convierte la foto de un molde físico (cartón/papel/cuero) en un contorno
+    vectorial suavizado escalado a milímetros reales y listo para exportar a DXF.
+    """
+    arr = np.frombuffer(bytes_imagen, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return None, None, "No se pudo leer la imagen del molde."
+
+    h, w = img.shape[:2]
+    if max(h, w) > 1000:
+        esc = 1000 / max(h, w)
+        img = cv2.resize(img, (int(w * esc), int(h * esc)))
+        h, w = img.shape[:2]
+
+    # Segmentar el molde físico del fondo usando contraste de luminancia y saturación
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (9, 9), 0)
+
+    # Evaluar bordes vs centro para detectar si el fondo es claro u oscuro
+    borde_val = np.mean([blur[0, :], blur[-1, :], blur[:, 0], blur[:, -1]])
+    centro_val = np.mean(blur[h // 4 : 3 * h // 4, w // 4 : 3 * w // 4])
+
+    if centro_val < borde_val:
+        _, mask = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    else:
+        _, mask = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Limpiar ruido y cerrar contorno
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    # Ignorar contornos pegados al marco de la foto
+    cv2.rectangle(mask, (0, 0), (w, h), 0, 6)
+
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return None, None, "No se detectó el contorno del molde. Coloca el molde sobre un fondo liso que contraste."
+
+    c_mayor = max(cnts, key=cv2.contourArea)
+    if cv2.contourArea(c_mayor) < (h * w * 0.03):
+        return None, None, "El molde detectado es demasiado pequeño. Acerca más la cámara al patrón."
+
+    peri = cv2.arcLength(c_mayor, True)
+    approx = cv2.approxPolyDP(c_mayor, 0.004 * peri, True)
+    pts_raw = approx.reshape(-1, 2).astype(np.float32)
+
+    # Normalizar a origen (0, 0) y escalar al ancho real en milímetros indicado por el marroquinero
+    min_xy = np.min(pts_raw, axis=0)
+    pts_norm = pts_raw - min_xy
+    max_w_px = max(1.0, float(np.max(pts_norm[:, 0])))
+    factor_mm = float(ancho_real_mm) / max_w_px
+
+    pts_mm = np.round(pts_norm * factor_mm).astype(np.int32)
+    dim_w = int(np.max(pts_mm[:, 0]))
+    dim_h = int(np.max(pts_mm[:, 1]))
+
+    return pts_mm, f"{dim_w} x {dim_h} mm", None
 
 def generar_contenido_dxf(puntos):
     dxf_content = [
@@ -380,7 +519,7 @@ def generar_contenido_dxf(puntos):
     return "\n".join(dxf_content)
 
 def crear_dxf_demo(puntos, nombre_archivo):
-    with open(nombre_archivo, "w") as f:
+    with open(nombre_archivo, "w", encoding="utf-8") as f:
         f.write(generar_contenido_dxf(puntos))
 
 # ------------------------------------------------------------------ Base de Datos
@@ -394,22 +533,35 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, titulo TEXT, 
                   descripcion TEXT, tipo_falla TEXT, solucion TEXT, fecha TEXT, media_path TEXT)''')
 
-    c.execute("SELECT COUNT(*) FROM moldes")
-    if c.fetchone()[0] == 0:
-        carp_dxf = os.path.join(TMP, "moldes_calzado")
+    # Verificar si ya existen las 3 categorías base (Calzado, Cartera, Casaca)
+    c.execute("SELECT COUNT(*) FROM moldes WHERE cliente IN ('Calzado', 'Cartera', 'Casaca')")
+    if c.fetchone()[0] < 12:
+        c.execute("DELETE FROM moldes WHERE origen = 'vector'")
+        carp_dxf = os.path.join(TMP, "moldes_catalogo")
         os.makedirs(carp_dxf, exist_ok=True)
-        moldes_calzado = [
-            ("Frente - Capellada", "Calzado Estándar", "240 x 140 mm", obtener_puntos_molde_calzado("Frente")),
-            ("Talón - Posterior", "Calzado Estándar", "220 x 95 mm", obtener_puntos_molde_calzado("Talón")),
-            ("Interior de Suela", "Calzado Estándar", "110 x 345 mm", obtener_puntos_molde_calzado("Interior")),
-            ("Suela - Base", "Calzado Estándar", "110 x 340 mm", obtener_puntos_molde_calzado("Suela"))
+        catalogo_inicial = [
+            # Calzado
+            ("Frente - Capellada", "Calzado", "240 x 140 mm", obtener_puntos_molde("Frente - Capellada")),
+            ("Talón - Posterior", "Calzado", "220 x 95 mm", obtener_puntos_molde("Talón - Posterior")),
+            ("Interior de Suela", "Calzado", "110 x 345 mm", obtener_puntos_molde("Interior de Suela")),
+            ("Suela - Base", "Calzado", "110 x 340 mm", obtener_puntos_molde("Suela - Base")),
+            # Cartera
+            ("Cartera - Cuerpo Principal", "Cartera", "260 x 205 mm", obtener_puntos_molde("Cartera - Cuerpo Principal")),
+            ("Cartera - Solapa Frontal", "Cartera", "220 x 130 mm", obtener_puntos_molde("Cartera - Solapa Frontal")),
+            ("Cartera - Fuelle Lateral", "Cartera", "80 x 185 mm", obtener_puntos_molde("Cartera - Fuelle Lateral")),
+            ("Cartera - Asa / Correa", "Cartera", "270 x 28 mm", obtener_puntos_molde("Cartera - Asa / Correa")),
+            # Casaca
+            ("Casaca - Pechera Delantera", "Casaca", "155 x 285 mm", obtener_puntos_molde("Casaca - Pechera Delantera")),
+            ("Casaca - Espalda Completa", "Casaca", "225 x 275 mm", obtener_puntos_molde("Casaca - Espalda Completa")),
+            ("Casaca - Manga Anatómica", "Casaca", "115 x 280 mm", obtener_puntos_molde("Casaca - Manga Anatómica")),
+            ("Casaca - Cuello / Solapa", "Casaca", "215 x 55 mm", obtener_puntos_molde("Casaca - Cuello / Solapa"))
         ]
-        for nom, cli, dim, pts in moldes_calzado:
-            ruta = os.path.join(carp_dxf, f"{nom.replace(' ', '_')}.dxf")
+        for nom, cat, dim, pts in catalogo_inicial:
+            ruta = os.path.join(carp_dxf, f"{nom.replace(' ', '_').replace('/', '_')}.dxf")
             crear_dxf_demo(pts, ruta)
             c.execute(
                 "INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf, origen) VALUES (?, ?, ?, ?, ?, ?)",
-                (nom, cli, dim, datetime.now().strftime("%d/%m/%Y"), ruta, "vector")
+                (nom, cat, dim, datetime.now().strftime("%d/%m/%Y"), ruta, "vector")
             )
     conn.commit()
     conn.close()
@@ -426,7 +578,6 @@ def aislar_piel_del_fondo(img_bgr):
     blur_sat = cv2.GaussianBlur(sat_ab, (15, 15), 0)
     _, mask_piel = cv2.threshold(blur_sat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # Si la foto o plancha reconstruida es casi todo piel (ej. cierre de plancha completa)
     if np.mean(mask_piel == 255) < 0.12 or np.mean(mask_piel == 255) > 0.92:
         mask_completa = np.ones((h, w), dtype=np.uint8) * 255
         cv2.rectangle(mask_completa, (0, 0), (w, h), 0, 12)
@@ -611,11 +762,6 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
 
 # ------------------------------------------------------------------ Motor de Distribución Integral en TODA la Plancha
 def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegidos_list, margen_cuchilla=16, llenar_toda_plancha=True, escala_pieza_pct=100):
-    """
-    Acomoda los moldes abarcando TODA la plancha de cuero (no solo una esquina),
-    escalando las piezas proporcionalmente al área útil de la piel y repitiendo
-    el set seleccionado si 'llenar_toda_plancha' está activo, siempre evitando los defectos rojos.
-    """
     arr = np.frombuffer(bytes_imagen, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     h_orig, w_orig = img.shape[:2]
@@ -631,7 +777,6 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
     area_piel_px = max(1, int(np.sum(mask_piel == 255)))
     ocupado_mask = cv2.bitwise_not(mask_piel)
 
-    # Marcar zonas prohibidas (defectos en rojo + margen de seguridad)
     for d in bboxes_defectos:
         bx, by, bw_d, bh_d = d["bbox"]
         cx, cy = bx + bw_d // 2, by + bh_d // 2
@@ -647,8 +792,6 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
         )
         cv2.circle(ocupado_mask, (cx, cy), radio_seg, 255, -1)
 
-    # Preparar lista de piezas base escaladas proporcionalmente al tamaño de la plancha entera
-    # Un molde estándar ocupa ~1/8 del ancho de la plancha (ajustable con escala_pieza_pct)
     factor_escala_plancha = (min(w, h) / 680.0) * (escala_pieza_pct / 100.0)
     factor_escala_plancha = max(0.45, factor_escala_plancha)
 
@@ -656,7 +799,8 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
     for m in moldes_elegidos_list:
         nombre_m = m["nombre"]
         cant = m.get("cantidad", 1)
-        pts_raw = obtener_puntos_molde_calzado(nombre_m)
+        ruta_dxf = m.get("dxf_path")
+        pts_raw = obtener_puntos_molde(nombre_m, ruta_dxf=ruta_dxf)
         pts_scaled = (pts_raw * factor_escala_plancha).astype(np.int32)
         min_xy = np.min(pts_scaled, axis=0)
         pts_norm = pts_scaled - min_xy
@@ -668,10 +812,8 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
                 "area": area_m
             })
 
-    # Ordenar de mayor a menor área (estrategia Best-Fit Decreasing para aprovechar mejor la plancha)
     cola_piezas.sort(key=lambda item: item["area"], reverse=True)
 
-    # Si se activa "Llenar toda la plancha", repetir el juego de moldes hasta cubrir toda la piel disponible
     if llenar_toda_plancha and len(cola_piezas) > 0:
         area_promedio_pieza = max(1000.0, np.mean([p["area"] for p in cola_piezas]))
         max_piezas_estimadas = min(45, max(len(cola_piezas), int((area_piel_px * 0.72) / area_promedio_pieza)))
@@ -687,7 +829,6 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
     conteo_por_nombre = {}
     area_ocupada_moldes = 0.0
 
-    # Paso de barrido fino para aprovechar cada hueco de toda la plancha
     paso_x = max(8, w // 75)
     paso_y = max(8, h // 65)
 
@@ -701,7 +842,6 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
         num_instancia = conteo_por_nombre[nombre_m]
 
         posicionado = False
-        # Probar 4 rotaciones + espejo horizontal para encajar en curvas de toda la plancha
         variantes = [
             (pts_norm, mw, mh, "0°"),
             (np.array([[pt[1], mw - pt[0]] for pt in pts_norm], np.int32), mh, mw, "90°"),
@@ -718,7 +858,6 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
                 if posicionado:
                     break
                 for x in range(12, w - cur_w - 12, paso_x):
-                    # Verificación rápida de esquinas antes de construir máscara completa
                     if (ocupado_mask[y, x] > 0 or
                         ocupado_mask[y + cur_h // 2, x + cur_w // 2] > 0 or
                         ocupado_mask[min(h - 1, y + cur_h), min(w - 1, x + cur_w)] > 0):
@@ -729,7 +868,6 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
                     cv2.fillPoly(temp_mask, [pts_tras], 255)
 
                     if np.sum(cv2.bitwise_and(ocupado_mask, temp_mask)) == 0:
-                        # Dibujar pieza ubicada con estilo de patrón de corte limpio
                         overlay = res_img.copy()
                         cv2.fillPoly(overlay, [pts_tras], (35, 55, 45))
                         cv2.addWeighted(overlay, 0.65, res_img, 0.35, 0, res_img)
@@ -743,7 +881,6 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
                             cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2
                         )
 
-                        # Reservar espacio con separación de cuchilla entre moldes
                         kernel_sep = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (12, 12))
                         mask_ocupar = cv2.dilate(temp_mask, kernel_sep)
                         ocupado_mask = cv2.bitwise_or(ocupado_mask, mask_ocupar)
@@ -1005,7 +1142,7 @@ elif opcion_menu == "Detección de Defectos":
             st.info(f"Tomas cargadas: **{len(imagenes_actuales)} foto(s)** listas para unir en una plancha entera.")
             if st.button("Limpiar fotos cargadas"):
                 st.session_state["imagenes_def_memoria"] = []
-                st.session_state["resultados_defectos_lote"] = []
+                st.session_state["resultado_plancha_defectos"] = None
                 st.session_state["plancha_completa_bytes"] = None
                 st.rerun()
 
@@ -1114,9 +1251,17 @@ elif opcion_menu == "Acomodo de Moldes":
 
         moldes_seleccionados = []
         if moldes_bd:
-            mapa_dxf = {f"{m[1]} ({m[3]})": (m[1], m[4]) for m in moldes_bd}
+            cat_filtro_nest = st.selectbox(
+                "Filtrar moldes por prenda / categoría:",
+                ["Todos", "Calzado", "Cartera", "Casaca", "Personalizados"]
+            )
+            moldes_filtrados_nest = [
+                m for m in moldes_bd
+                if cat_filtro_nest == "Todos" or m[2].lower() == cat_filtro_nest.lower()
+            ]
+            mapa_dxf = {f"{m[1]} [{m[2]}] ({m[3]})": (m[1], m[4]) for m in moldes_filtrados_nest}
             opciones = list(mapa_dxf.keys())
-            elegidos = st.multiselect("Piezas a distribuir en la plancha:", options=opciones, default=opciones)
+            elegidos = st.multiselect("Piezas a distribuir en la plancha:", options=opciones, default=opciones[:4])
             for item_nom in elegidos:
                 nom_real, path_dxf = mapa_dxf[item_nom]
                 cant = st.number_input(f"Cantidad mínima de '{nom_real}'", min_value=1, max_value=30, value=1, key=f"cant_nest_{item_nom}")
@@ -1214,7 +1359,7 @@ elif opcion_menu == "Acomodo de Moldes":
                     )
                 pts_dxf_all = []
                 for m_sel in moldes_seleccionados:
-                    pts_dxf_all.extend(obtener_puntos_molde_calzado(m_sel["nombre"]).tolist())
+                    pts_dxf_all.extend(obtener_puntos_molde(m_sel["nombre"], ruta_dxf=m_sel.get("dxf_path")).tolist())
                 st.download_button(
                     label="Descargar Vector CAD (DXF)",
                     data=generar_contenido_dxf(pts_dxf_all),
@@ -1223,55 +1368,179 @@ elif opcion_menu == "Acomodo de Moldes":
                     use_container_width=True
                 )
 
-# ================================================================== MÓDULO 4: CATÁLOGO DE MOLDES
+# ================================================================== MÓDULO 4: CATÁLOGO DE MOLDES + DIGITALIZADOR FOTO -> DXF
 elif opcion_menu == "Catálogo de Moldes":
     st.title("Catálogo Digital de Moldes")
-    st.caption("Administra tus patrones vectoriales e imprime plantillas individuales a escala.")
+    st.caption("Sube fotos de tus moldes físicos para convertirlos automáticamente a formato vectorial DXF, o utiliza nuestros patrones de Calzado, Cartera y Casaca.")
 
+    # --- SECCIÓN 1: DIGITALIZADOR DE MOLDES DEL MARROQUINERO (FOTO -> DXF) ---
+    with st.container(border=True):
+        st.subheader("Subir y Convertir Molde del Marroquinero a Vector DXF")
+        st.caption("Toma una foto de tu molde de cartón o papel sobre una mesa que contraste y la app extraerá su contorno vectorial DXF.")
+
+        c_up1, c_up2 = st.columns([1.2, 1])
+        with c_up1:
+            nombre_molde_nuevo = st.text_input("Nombre de la Pieza / Molde", placeholder="Ej. Bolsillo Lateral Cartera o Solapa Casaca")
+            archivo_molde_fisico = st.file_uploader(
+                "Sube foto del molde físico (JPG, PNG, WEBP) o archivo DXF existente",
+                type=["jpg", "jpeg", "png", "webp", "dxf"],
+                key="uploader_molde_dxf"
+            )
+        with c_up2:
+            categoria_molde_nuevo = st.selectbox("Categoría de Prenda", ["Personalizados", "Calzado", "Cartera", "Casaca"])
+            ancho_real_mm = st.number_input("Ancho real del molde (mm) para escala exacta", min_value=20, max_value=1500, value=220, step=10)
+
+        if archivo_molde_fisico is not None:
+            nom_arch = archivo_molde_fisico.name
+            bytes_arch = archivo_molde_fisico.getvalue()
+            nombre_final = nombre_molde_nuevo.strip() or os.path.splitext(nom_arch)[0]
+
+            if nom_arch.lower().endswith(".dxf"):
+                carp_dxf = os.path.join(TMP, "moldes_personalizados")
+                os.makedirs(carp_dxf, exist_ok=True)
+                ruta_dxf_guardado = os.path.join(carp_dxf, f"{nombre_final.replace(' ', '_')}_{datetime.now().strftime('%H%M%S')}.dxf")
+                with open(ruta_dxf_guardado, "wb") as f_out:
+                    f_out.write(bytes_arch)
+                pts_leidos = leer_puntos_desde_dxf(ruta_dxf_guardado)
+                dim_texto = f"{int(np.max(pts_leidos[:,0]))} x {int(np.max(pts_leidos[:,1]))} mm" if pts_leidos is not None else f"{ancho_real_mm} mm"
+
+                if st.button("Guardar Molde DXF en Catálogo", type="primary", use_container_width=True):
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    c.execute(
+                        "INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf, origen) VALUES (?, ?, ?, ?, ?, ?)",
+                        (nombre_final, categoria_molde_nuevo, dim_texto, datetime.now().strftime("%d/%m/%Y"), ruta_dxf_guardado, "subido")
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Molde '{nombre_final}' agregado al catálogo.")
+                    st.rerun()
+            else:
+                pts_vec, dim_str, err_vec = vectorizar_foto_molde_a_dxf(bytes_arch, ancho_real_mm=ancho_real_mm)
+                if err_vec:
+                    st.error(err_vec)
+                else:
+                    col_v1, col_v2 = st.columns(2)
+                    with col_v1:
+                        st.image(bytes_arch, caption="Foto original subida", use_container_width=True)
+                    with col_v2:
+                        lienzo_prev = np.ones((300, 320, 3), dtype=np.uint8) * 255
+                        for gx in range(0, 320, 32):
+                            cv2.line(lienzo_prev, (gx, 0), (gx, 300), (235, 235, 235), 1)
+                        for gy in range(0, 300, 32):
+                            cv2.line(lienzo_prev, (0, gy), (320, gy), (235, 235, 235), 1)
+                        esc_p = min(260.0 / max(1, np.max(pts_vec[:, 0])), 230.0 / max(1, np.max(pts_vec[:, 1])))
+                        pts_p = (pts_vec * esc_p).astype(np.int32) + np.array([30, 30])
+                        cv2.polylines(lienzo_prev, [pts_p], True, (0, 150, 70), 2)
+                        st.image(lienzo_prev, caption=f"Contorno Vectorizado DXF ({dim_str})", use_container_width=True)
+
+                    dxf_str = generar_contenido_dxf(pts_vec)
+                    c_btn1, c_btn2 = st.columns(2)
+                    with c_btn1:
+                        if st.button("Convertir a DXF y Guardar en Catálogo", type="primary", use_container_width=True):
+                            carp_dxf = os.path.join(TMP, "moldes_personalizados")
+                            os.makedirs(carp_dxf, exist_ok=True)
+                            ruta_dxf_guardado = os.path.join(carp_dxf, f"{nombre_final.replace(' ', '_')}_{datetime.now().strftime('%H%M%S')}.dxf")
+                            with open(ruta_dxf_guardado, "w", encoding="utf-8") as f_out:
+                                f_out.write(dxf_str)
+                            conn = sqlite3.connect(DB_PATH)
+                            c = conn.cursor()
+                            c.execute(
+                                "INSERT INTO moldes (nombre, cliente, dimensiones, fecha, archivo_dxf, origen) VALUES (?, ?, ?, ?, ?, ?)",
+                                (nombre_final, categoria_molde_nuevo, dim_str, datetime.now().strftime("%d/%m/%Y"), ruta_dxf_guardado, "subido")
+                            )
+                            conn.commit()
+                            conn.close()
+                            st.success(f"Molde '{nombre_final}' vectorizado a DXF y guardado en el catálogo.")
+                            st.rerun()
+                    with c_btn2:
+                        st.download_button(
+                            "Descargar DXF Directo",
+                            data=dxf_str,
+                            file_name=f"{nombre_final.replace(' ', '_')}.dxf",
+                            mime="application/dxf",
+                            use_container_width=True
+                        )
+
+    st.write("---")
+
+    # --- SECCIÓN 2: BIBLIOTECA DE MOLDES POR CATEGORÍA ---
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT id, nombre, cliente, dimensiones, archivo_dxf FROM moldes ORDER BY id ASC")
+    c.execute("SELECT id, nombre, cliente, dimensiones, archivo_dxf, origen FROM moldes ORDER BY id DESC")
     m_todos = c.fetchall()
     conn.close()
 
-    cols = st.columns(2)
-    for idx, m in enumerate(m_todos):
-        with cols[idx % 2]:
-            st.markdown(f"#### {m[1]}")
-            st.write(f"Dimensiones: **{m[3]}**")
-            pts_molde = obtener_puntos_molde_calzado(m[1])
+    cat_vista = st.radio(
+        "Filtrar Catálogo por Categoría:",
+        ["Todos", "Calzado", "Cartera", "Casaca", "Personalizados"],
+        horizontal=True
+    )
 
-            lienzo_m = np.ones((400, 320, 3), dtype=np.uint8) * 255
-            for gx in range(0, 320, 40):
-                cv2.line(lienzo_m, (gx, 0), (gx, 400), (235, 235, 235), 1)
-            for gy in range(0, 400, 40):
-                cv2.line(lienzo_m, (0, gy), (320, gy), (235, 235, 235), 1)
-            pts_centrados = pts_molde - np.min(pts_molde, axis=0) + np.array([35, 30])
-            cv2.polylines(lienzo_m, [pts_centrados], True, (0, 0, 0), 2)
-            cv2.putText(lienzo_m, m[1], (35, 385), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 1)
+    m_filtrados = [
+        m for m in m_todos
+        if cat_vista == "Todos" or m[2].lower() == cat_vista.lower()
+    ]
 
-            st.image(lienzo_m, caption="Vista previa de plantilla imprimible", use_container_width=True)
-            _, buf_m = cv2.imencode(".png", lienzo_m)
+    if not m_filtrados:
+        st.info(f"No hay moldes en la categoría '{cat_vista}'.")
+    else:
+        cols = st.columns(2)
+        for idx, m in enumerate(m_filtrados):
+            m_id, m_nom, m_cat, m_dim, m_dxf, m_origen = m
+            with cols[idx % 2]:
+                with st.container(border=True):
+                    st.markdown(f"#### {m_nom}")
+                    st.write(f"Categoría: **{m_cat}** | Dimensiones: **{m_dim}**")
+                    pts_molde = obtener_puntos_molde(m_nom, ruta_dxf=m_dxf)
 
-            c_b1, c_b2 = st.columns(2)
-            with c_b1:
-                st.download_button(
-                    "Imprimir Plantilla (PNG)",
-                    data=buf_m.tobytes(),
-                    file_name=f"Plantilla_{m[1].replace(' ', '_')}.png",
-                    mime="image/png",
-                    key=f"imp_m_{m[0]}",
-                    use_container_width=True
-                )
-            with c_b2:
-                st.download_button(
-                    "Descargar DXF",
-                    data=generar_contenido_dxf(pts_molde),
-                    file_name=f"{m[1].replace(' ', '_')}.dxf",
-                    mime="application/dxf",
-                    key=f"dxf_m_{m[0]}",
-                    use_container_width=True
-                )
+                    lienzo_m = np.ones((360, 320, 3), dtype=np.uint8) * 255
+                    for gx in range(0, 320, 40):
+                        cv2.line(lienzo_m, (gx, 0), (gx, 360), (235, 235, 235), 1)
+                    for gy in range(0, 360, 40):
+                        cv2.line(lienzo_m, (0, gy), (320, gy), (235, 235, 235), 1)
+
+                    min_xy = np.min(pts_molde, axis=0)
+                    pts_zero = pts_molde - min_xy
+                    max_w = max(1, int(np.max(pts_zero[:, 0])))
+                    max_h = max(1, int(np.max(pts_zero[:, 1])))
+                    esc_fit = min(250.0 / max_w, 270.0 / max_h)
+                    pts_centrados = (pts_zero * esc_fit).astype(np.int32) + np.array([35, 30])
+
+                    cv2.polylines(lienzo_m, [pts_centrados], True, (0, 0, 0), 2)
+                    cv2.putText(lienzo_m, f"{m_nom} ({m_dim})", (20, 345), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 0, 0), 1)
+
+                    st.image(lienzo_m, caption="Vista previa vectorial del molde", use_container_width=True)
+                    _, buf_m = cv2.imencode(".png", lienzo_m)
+
+                    c_b1, c_b2 = st.columns(2)
+                    with c_b1:
+                        st.download_button(
+                            "Imprimir Plantilla (PNG)",
+                            data=buf_m.tobytes(),
+                            file_name=f"Plantilla_{m_nom.replace(' ', '_')}.png",
+                            mime="image/png",
+                            key=f"imp_m_{m_id}",
+                            use_container_width=True
+                        )
+                    with c_b2:
+                        st.download_button(
+                            "Descargar DXF",
+                            data=generar_contenido_dxf(pts_molde),
+                            file_name=f"{m_nom.replace(' ', '_')}.dxf",
+                            mime="application/dxf",
+                            key=f"dxf_m_{m_id}",
+                            use_container_width=True
+                        )
+
+                    if m_origen == "subido":
+                        if st.button("Eliminar Molde Subido", key=f"del_molde_{m_id}", use_container_width=True):
+                            conn = sqlite3.connect(DB_PATH)
+                            c = conn.cursor()
+                            c.execute("DELETE FROM moldes WHERE id = ?", (m_id,))
+                            conn.commit()
+                            conn.close()
+                            st.rerun()
 
 # ================================================================== MÓDULO 5: CALIBRACIÓN DE ESCÁNER
 elif opcion_menu == "Calibración de Escáner":
