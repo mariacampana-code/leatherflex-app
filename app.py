@@ -634,59 +634,40 @@ if not os.path.exists(ruta_cal):
     with open(ruta_cal, "w") as f:
         json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
 
-# ================================================================== MÓDULO 1: CAPTURA DEL CUERO (VISTA ÚNICA UNIFICADA)
+# ================================================================== MÓDULO 1: CAPTURA DEL CUERO (UNA SOLA OPCIÓN LIMPIA)
 if opcion_menu == "Captura del Cuero":
     st.title("Captura del Cuero")
-    st.caption("Sube varias fotos o videos desde tu biblioteca, o toma múltiples fotos en vivo seguidas en una sola ventana.")
+    st.caption("Sube fotos o videos desde tu galería, toma fotos con la cámara de tu dispositivo o graba video. Puedes seguir agregando más archivos antes de guardar.")
 
-    # Estado acumulativo para fotos tomadas en vivo una tras otra
-    if "bandeja_camara_vivo" not in st.session_state:
-        st.session_state["bandeja_camara_vivo"] = []
-    if "cam_counter" not in st.session_state:
-        st.session_state["cam_counter"] = 0
+    if "bandeja_capturas" not in st.session_state:
+        st.session_state["bandeja_capturas"] = []
+    if "uploader_key" not in st.session_state:
+        st.session_state["uploader_key"] = 0
 
     with st.container(border=True):
         nota_lote = st.text_input("Identificador / Nombre del Lote (Opcional)", placeholder="Ej. Lote Cuero Vacuno Mesa 1", key="nota_unica")
 
-        col_lib, col_cam = st.columns([1, 1])
+        archivos_nuevos = st.file_uploader(
+            "Seleccionar de la biblioteca, tomar foto o grabar video (puedes elegir varios a la vez)",
+            type=["jpg", "png", "jpeg", "webp", "mp4", "mov", "avi"],
+            accept_multiple_files=True,
+            key=f"uploader_unico_{st.session_state['uploader_key']}"
+        )
 
-        with col_lib:
-            st.subheader("1. Desde Biblioteca (Fotos y Videos)")
-            archivos_biblioteca = st.file_uploader(
-                "Selecciona una o varias fotos / videos a la vez",
-                type=["jpg", "png", "jpeg", "webp", "mp4", "mov", "avi"],
-                accept_multiple_files=True,
-                key="uploader_unico_biblioteca"
-            )
-            if archivos_biblioteca:
-                st.info(f"{len(archivos_biblioteca)} archivo(s) seleccionados de la biblioteca.")
+        # Si el usuario selecciona o toma archivos, se agregan automáticamente a la bandeja acumulativa
+        if archivos_nuevos:
+            for arch in archivos_nuevos:
+                st.session_state["bandeja_capturas"].append((arch.name, arch.getvalue()))
+            st.session_state["uploader_key"] += 1
+            st.rerun()
 
-        with col_cam:
-            st.subheader("2. Cámara en Vivo (Toma Múltiple)")
-            foto_vivo = st.camera_input(
-                "Toma una foto y agrégala; podrás tomar otra inmediatamente después",
-                key=f"camara_vivo_{st.session_state['cam_counter']}"
-            )
-            if foto_vivo is not None:
-                if st.button("Agregar Esta Foto y Tomar Otra", use_container_width=True):
-                    num = len(st.session_state["bandeja_camara_vivo"]) + 1
-                    st.session_state["bandeja_camara_vivo"].append((f"camara_vivo_{num}.jpg", foto_vivo.getvalue()))
-                    st.session_state["cam_counter"] += 1
-                    st.rerun()
+        bandeja = st.session_state["bandeja_capturas"]
 
-        # Consolidar todo lo acumulado (cámara en vivo + archivos de biblioteca)
-        total_items = []
-        for nom_c, bytes_c in st.session_state["bandeja_camara_vivo"]:
-            total_items.append((nom_c, bytes_c))
-        if archivos_biblioteca:
-            for arch in archivos_biblioteca:
-                total_items.append((arch.name, arch.getvalue()))
-
-        if total_items:
+        if bandeja:
             st.write("---")
-            st.markdown(f"**Archivos listos para guardar ({len(total_items)} en total):**")
+            st.markdown(f"**Archivos cargados ({len(bandeja)}):** Puedes seguir tocando el botón de arriba para tomar o subir más fotos.")
             cols_prev = st.columns(4)
-            for idx_p, (nom_p, bytes_p) in enumerate(total_items):
+            for idx_p, (nom_p, bytes_p) in enumerate(bandeja):
                 with cols_prev[idx_p % 4]:
                     if nom_p.lower().endswith((".mp4", ".mov", ".avi")):
                         st.video(bytes_p)
@@ -696,10 +677,10 @@ if opcion_menu == "Captura del Cuero":
 
             col_g1, col_g2 = st.columns([3, 1])
             with col_g1:
-                if st.button(f"Guardar {len(total_items)} Archivo(s) y Preparar Análisis", type="primary", use_container_width=True):
+                if st.button(f"Guardar {len(bandeja)} Archivo(s) y Preparar Análisis", type="primary", use_container_width=True):
                     rutas_lote = []
                     imagenes_memoria = []
-                    for idx, (nom_item, bytes_item) in enumerate(total_items):
+                    for idx, (nom_item, bytes_item) in enumerate(bandeja):
                         etiqueta = f"{nota_lote} #{idx+1}" if nota_lote else f"Captura #{idx+1} ({nom_item})"
                         ruta_g = guardar_captura_en_bd(nom_item, bytes_item, etiqueta)
                         if not nom_item.lower().endswith((".mp4", ".mov", ".avi")):
@@ -711,15 +692,15 @@ if opcion_menu == "Captura del Cuero":
                         st.session_state["imagenes_def_memoria"] = imagenes_memoria
                         st.session_state["pieles_nesting_memoria"] = imagenes_memoria
 
-                    st.session_state["bandeja_camara_vivo"] = []
-                    st.session_state["cam_counter"] += 1
-                    st.success(f"{len(total_items)} archivo(s) guardados correctamente.")
+                    st.session_state["bandeja_capturas"] = []
+                    st.session_state["uploader_key"] += 1
+                    st.success(f"{len(bandeja)} archivo(s) guardados correctamente.")
                     st.rerun()
 
             with col_g2:
-                if st.button("Limpiar Bandeja", use_container_width=True):
-                    st.session_state["bandeja_camara_vivo"] = []
-                    st.session_state["cam_counter"] += 1
+                if st.button("Limpiar Todo", use_container_width=True):
+                    st.session_state["bandeja_capturas"] = []
+                    st.session_state["uploader_key"] += 1
                     st.rerun()
 
     st.write("---")
@@ -731,7 +712,7 @@ if opcion_menu == "Captura del Cuero":
     conn.close()
 
     if not posts:
-        st.info("No hay capturas aún. Sube fotos/videos o toma capturas en vivo arriba.")
+        st.info("No hay capturas aún. Usa el selector de arriba para subir fotos o videos.")
     else:
         cols_hist = st.columns(3)
         for idx, p in enumerate(posts):
