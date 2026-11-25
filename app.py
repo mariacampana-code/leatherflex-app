@@ -1,5 +1,6 @@
-"""Leather-Flex 3D - Motor de IA Embebido (Random Forest + Analisis Multi-Canal LAB + Video Keyframes), Lotes y Plano Imprimible"""
+"""Leather-Flex 3D - Ensamblaje de Plancha Completa (Mosaico/Stitching), IA de Defectos y Nesting Integral"""
 import os
+import math
 import json
 import sqlite3
 import tempfile
@@ -28,15 +29,14 @@ st.set_page_config(
 
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
-
 EXTENSIONES_VIDEO = (".mp4", ".mov", ".avi", ".mkv", ".webm")
 
 # ------------------------------------------------------------------ Motor de IA Embebido (Aprendizaje Automático)
 CLASES_DEFECTOS = [
     "Veta Natural (Sano)",
-    "Picadura de Garrapata / Poro",
-    "Cicatriz / Corte Lineal",
-    "Rasguño Superficial",
+    "Picadura / Hueco",
+    "Cicatriz / Rayón Profundo",
+    "Rayón Superficial",
     "Agujero / Perforación",
     "Mancha / Variación de Curtido"
 ]
@@ -99,13 +99,8 @@ def predecir_defecto_ia(vector_caracteristicas):
         clase_id = int(np.argmax(probs))
         return clase_id, CLASES_DEFECTOS[clase_id], round(float(probs[clase_id] * 100.0), 1)
 
-# ------------------------------------------------------------------ Extractor Inteligente de Fotogramas de Video
+# ------------------------------------------------------------------ Extractor de Fotogramas de Video
 def extraer_fotogramas_nitidos_video(bytes_video, nombre_video="video.mp4", max_fotogramas=6):
-    """
-    Extrae los fotogramas más nítidos de un video descartando los cuadros borrosos
-    por movimiento rápido (usando varianza de Laplaciano) y evitando duplicados si
-    la cámara se movió lento.
-    """
     ext = os.path.splitext(nombre_video)[1] or ".mp4"
     tmp_vid = os.path.join(TMP, f"vid_proc_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}")
     with open(tmp_vid, "wb") as f:
@@ -120,7 +115,6 @@ def extraer_fotogramas_nitidos_video(bytes_video, nombre_video="video.mp4", max_
     if total_frames <= 0:
         total_frames = 300
 
-    # Evaluar hasta 45 puntos candidatos distribuidos en el video
     paso = max(1, total_frames // 45)
     candidatos = []
 
@@ -131,7 +125,6 @@ def extraer_fotogramas_nitidos_video(bytes_video, nombre_video="video.mp4", max_
             break
         if frame_idx % paso == 0:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            # Medida de nitidez (mayor valor = menos desenfoque por movimiento)
             nitidez = float(cv2.Laplacian(gray, cv2.CV_64F).var())
             hist = cv2.calcHist([gray], [0], None, [32], [0, 256])
             cv2.normalize(hist, hist)
@@ -153,7 +146,6 @@ def extraer_fotogramas_nitidos_video(bytes_video, nombre_video="video.mp4", max_
     if not candidatos:
         return []
 
-    # Dividir el video en segmentos temporales y elegir el fotograma MÁS NÍTIDO de cada segmento
     num_segmentos = min(max_fotogramas, len(candidatos))
     segmentos = np.array_split(candidatos, num_segmentos)
     seleccionados = []
@@ -163,7 +155,6 @@ def extraer_fotogramas_nitidos_video(bytes_video, nombre_video="video.mp4", max_
         if len(seg) == 0:
             continue
         mejor = max(seg, key=lambda item: item["nitidez"])
-        # Evitar fotogramas prácticamente idénticos si la cámara estuvo detenida
         if ultimo_hist is not None:
             similitud = cv2.compareHist(ultimo_hist, mejor["hist"], cv2.HISTCMP_CORREL)
             if similitud > 0.992 and len(seleccionados) > 0:
@@ -171,13 +162,12 @@ def extraer_fotogramas_nitidos_video(bytes_video, nombre_video="video.mp4", max_
         ultimo_hist = mejor["hist"]
         ok, buf = cv2.imencode(".jpg", mejor["frame"], [int(cv2.IMWRITE_JPEG_QUALITY), 92])
         if ok:
-            etiqueta = f"{os.path.splitext(nombre_video)[0]} (Seg {mejor['tiempo']}s)"
+            etiqueta = f"{os.path.splitext(nombre_video)[0]}_seg_{mejor['tiempo']}s.jpg"
             seleccionados.append((etiqueta, buf.tobytes()))
 
     return seleccionados
 
 def expandir_archivos_a_imagenes(lista_archivos):
-    """Convierte una mezcla de fotos y videos en una lista unificada de imágenes nítidas listas para la IA."""
     imagenes_listas = []
     for nom, b_data in lista_archivos:
         if nom.lower().endswith(EXTENSIONES_VIDEO):
@@ -186,6 +176,92 @@ def expandir_archivos_a_imagenes(lista_archivos):
         else:
             imagenes_listas.append((nom, b_data))
     return imagenes_listas
+
+# ------------------------------------------------------------------ Ensamblador de Plancha Completa de Cuero (Mosaico + Stitching)
+def ensamblar_plancha_completa(lista_imagenes_bytes, columnas_cuadricula=0):
+    """
+    Une múltiples fotos parciales de una plancha de cuero en UNA SOLA PLANCHA ENTERA.
+    - Si las fotos tienen solapamiento óptico (panorámica), intenta OpenCV Stitcher.
+    - Si son tomas en cuadrícula/sectores (como 3x4 = 12 fotos o cualquier cantidad N),
+      las ensambla limpiamente en una única plancha unificada sin bordes divisorios
+      para que la IA detecte defectos y acomode los moldes sobre toda la superficie.
+    """
+    imgs_bgr = []
+    for _, b_img in lista_imagenes_bytes:
+        arr = np.frombuffer(b_img, np.uint8)
+        im = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if im is not None:
+            imgs_bgr.append(im)
+
+    if not imgs_bgr:
+        return None, "No se pudieron decodificar las imágenes."
+
+    if len(imgs_bgr) == 1:
+        im_unica = imgs_bgr[0]
+        h0, w0 = im_unica.shape[:2]
+        if max(h0, w0) > 1400:
+            esc = 1400 / max(h0, w0)
+            im_unica = cv2.resize(im_unica, (int(w0 * esc), int(h0 * esc)))
+        ok, buf = cv2.imencode(".jpg", im_unica, [int(cv2.IMWRITE_JPEG_QUALITY), 94])
+        return buf.tobytes(), f"Plancha individual cargada ({im_unica.shape[1]}x{im_unica.shape[0]} px)"
+
+    # Intento 1: Panorámica automática por puntos clave si hay solapamiento directo (<= 8 fotos)
+    if columnas_cuadricula == 0 and 2 <= len(imgs_bgr) <= 8:
+        try:
+            stitcher = cv2.Stitcher_create(cv2.Stitcher_SCANS)
+            status, pano = stitcher.stitch(imgs_bgr)
+            if status == cv2.Stitcher_OK and pano is not None:
+                hp, wp = pano.shape[:2]
+                if max(hp, wp) > 1600:
+                    esc = 1600 / max(hp, wp)
+                    pano = cv2.resize(pano, (int(wp * esc), int(hp * esc)))
+                ok, buf = cv2.imencode(".jpg", pano, [int(cv2.IMWRITE_JPEG_QUALITY), 94])
+                return buf.tobytes(), f"Plancha unida automáticamente por visión panorámica ({len(imgs_bgr)} tomas)"
+        except Exception:
+            pass
+
+    # Intento 2: Ensamblaje de Plancha Completa en Cuadrícula Continua (para N fotos: 4, 6, 9, 12, etc.)
+    n = len(imgs_bgr)
+    if columnas_cuadricula > 0:
+        cols = columnas_cuadricula
+    else:
+        # Proporción horizontal natural de plancha de cuero (ej. 12 fotos -> 4 cols x 3 filas)
+        cols = math.ceil(math.sqrt(n * 1.35))
+    filas = math.ceil(n / cols)
+
+    # Normalizar tamaño de cada sector para unión limpia y uniforme
+    sector_w = max(240, min(480, 1440 // cols))
+    sector_h = max(200, min(400, 1080 // filas))
+
+    # Color medio del cuero para rellenar espacios vacíos si N no llena el rectángulo exacto
+    muestra_centro = imgs_bgr[0][
+        imgs_bgr[0].shape[0] // 4 : 3 * imgs_bgr[0].shape[0] // 4,
+        imgs_bgr[0].shape[1] // 4 : 3 * imgs_bgr[0].shape[1] // 4
+    ]
+    color_base_piel = tuple(map(int, np.median(muestra_centro.reshape(-1, 3), axis=0))) if muestra_centro.size > 0 else (140, 100, 70)
+
+    plancha = np.full((filas * sector_h, cols * sector_w, 3), color_base_piel, dtype=np.uint8)
+
+    for idx, im in enumerate(imgs_bgr):
+        r = idx // cols
+        c = idx % cols
+        im_res = cv2.resize(im, (sector_w, sector_h), interpolation=cv2.INTER_AREA)
+        y1, y2 = r * sector_h, (r + 1) * sector_h
+        x1, x2 = c * sector_w, (c + 1) * sector_w
+        plancha[y1:y2, x1:x2] = im_res
+
+    # Suavizar sutilmente las uniones entre sectores para evitar falsas líneas de costura
+    for c in range(1, cols):
+        x_seam = c * sector_w
+        x_a, x_b = max(0, x_seam - 4), min(plancha.shape[1], x_seam + 4)
+        plancha[:, x_a:x_b] = cv2.GaussianBlur(plancha[:, x_a:x_b], (7, 1), 0)
+    for r in range(1, filas):
+        y_seam = r * sector_h
+        y_a, y_b = max(0, y_seam - 4), min(plancha.shape[0], y_seam + 4)
+        plancha[y_a:y_b, :] = cv2.GaussianBlur(plancha[y_a:y_b, :], (1, 7), 0)
+
+    ok, buf = cv2.imencode(".jpg", plancha, [int(cv2.IMWRITE_JPEG_QUALITY), 94])
+    return buf.tobytes(), f"Plancha entera reconstruida desde {n} fotos ({cols} columnas x {filas} filas = {plancha.shape[1]}x{plancha.shape[0]} px)"
 
 # ------------------------------------------------------------------ CSS Personalizado
 st.markdown("""
@@ -350,9 +426,10 @@ def aislar_piel_del_fondo(img_bgr):
     blur_sat = cv2.GaussianBlur(sat_ab, (15, 15), 0)
     _, mask_piel = cv2.threshold(blur_sat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    if np.mean(mask_piel == 255) < 0.15 or np.mean(mask_piel == 255) > 0.96:
+    # Si la foto o plancha reconstruida es casi todo piel (ej. cierre de plancha completa)
+    if np.mean(mask_piel == 255) < 0.12 or np.mean(mask_piel == 255) > 0.92:
         mask_completa = np.ones((h, w), dtype=np.uint8) * 255
-        cv2.rectangle(mask_completa, (0, 0), (w, h), 0, 10)
+        cv2.rectangle(mask_completa, (0, 0), (w, h), 0, 12)
         return mask_completa
 
     kernel_fill = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))
@@ -367,7 +444,7 @@ def aislar_piel_del_fondo(img_bgr):
     mask_limpia = np.zeros((h, w), dtype=np.uint8)
     cv2.drawContours(mask_limpia, [c_mayor], -1, 255, -1)
 
-    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (14, 14))
     mask_interior = cv2.erode(mask_limpia, kernel_erode, iterations=1)
     return mask_interior
 
@@ -426,7 +503,7 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
             return None, [], [], "Error: El archivo no es una imagen válida o está dañado."
 
         h_orig, w_orig = img.shape[:2]
-        max_dim = 1280
+        max_dim = 1400
         if max(h_orig, w_orig) > max_dim:
             escala = max_dim / max(h_orig, w_orig)
             img = cv2.resize(img, (int(w_orig * escala), int(h_orig * escala)))
@@ -512,37 +589,37 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
                 })
 
                 cv2.drawContours(overlay_rojo, [c], -1, (0, 0, 255), -1)
-                pad = 6
-                cv2.rectangle(
-                    img_viz_bgr,
-                    (max(0, x - pad), max(0, y - pad)),
-                    (min(w, x + bw + pad), min(h, y + bh + pad)),
-                    (0, 0, 255),
-                    2
-                )
+                cx, cy = x + bw // 2, y + bh // 2
+                radio = max(14, int(max(bw, bh) * 0.65))
+                cv2.circle(img_viz_bgr, (cx, cy), radio, (0, 0, 255), 3)
                 cv2.putText(
                     img_viz_bgr,
-                    f"D{idx_def}",
-                    (max(0, x - pad), max(16, y - pad - 4)),
+                    f"D{idx_def}: {tipo_label.split('/')[0].strip()}",
+                    (max(4, cx - radio), max(18, cy - radio - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.48,
+                    0.52,
                     (0, 0, 255),
                     2
                 )
                 idx_def += 1
 
-        cv2.addWeighted(overlay_rojo, 0.30, img_viz_bgr, 0.70, 0, img_viz_bgr)
+        cv2.addWeighted(overlay_rojo, 0.32, img_viz_bgr, 0.68, 0, img_viz_bgr)
         img_viz_rgb = cv2.cvtColor(img_viz_bgr, cv2.COLOR_BGR2RGB)
         return img_viz_rgb, lista_obstaculos_px, reporte_defectos, None
     except Exception as e:
         return None, [], [], f"Error técnico al procesar imagen: {str(e)}"
 
-# ------------------------------------------------------------------ Motor de Distribución / Nesting
-def ubicar_moldes_en_piel(bytes_imagen, bboxes_defectos, moldes_elegidos_list, margen_cuchilla=20):
+# ------------------------------------------------------------------ Motor de Distribución Integral en TODA la Plancha
+def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegidos_list, margen_cuchilla=16, llenar_toda_plancha=True, escala_pieza_pct=100):
+    """
+    Acomoda los moldes abarcando TODA la plancha de cuero (no solo una esquina),
+    escalando las piezas proporcionalmente al área útil de la piel y repitiendo
+    el set seleccionado si 'llenar_toda_plancha' está activo, siempre evitando los defectos rojos.
+    """
     arr = np.frombuffer(bytes_imagen, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     h_orig, w_orig = img.shape[:2]
-    max_dim = 1280
+    max_dim = 1400
     if max(h_orig, w_orig) > max_dim:
         escala = max_dim / max(h_orig, w_orig)
         img = cv2.resize(img, (int(w_orig * escala), int(h_orig * escala)))
@@ -551,99 +628,142 @@ def ubicar_moldes_en_piel(bytes_imagen, bboxes_defectos, moldes_elegidos_list, m
     res_img = img.copy()
 
     mask_piel = aislar_piel_del_fondo(img)
+    area_piel_px = max(1, int(np.sum(mask_piel == 255)))
     ocupado_mask = cv2.bitwise_not(mask_piel)
 
+    # Marcar zonas prohibidas (defectos en rojo + margen de seguridad)
     for d in bboxes_defectos:
         bx, by, bw_d, bh_d = d["bbox"]
-        cv2.rectangle(
+        cx, cy = bx + bw_d // 2, by + bh_d // 2
+        radio_vis = max(14, int(max(bw_d, bh_d) * 0.65))
+        radio_seg = radio_vis + margen_cuchilla
+
+        cv2.circle(res_img, (cx, cy), radio_vis, (0, 0, 255), 3)
+        cv2.putText(
             res_img,
-            (max(0, bx - 5), max(0, by - 5)),
-            (min(w, bx + bw_d + 5), min(h, by + bh_d + 5)),
-            (0, 0, 255),
-            2
+            d["tipo"].split("/")[0].strip(),
+            (max(4, cx - radio_vis), max(18, cy - radio_vis - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 0, 255), 2
         )
-        cv2.rectangle(
-            ocupado_mask,
-            (max(0, bx - margen_cuchilla), max(0, by - margen_cuchilla)),
-            (min(w, bx + bw_d + margen_cuchilla), min(h, by + bh_d + margen_cuchilla)),
-            255, -1
-        )
+        cv2.circle(ocupado_mask, (cx, cy), radio_seg, 255, -1)
 
-    piezas_colocadas = []
-    piezas_no_cabieron = []
+    # Preparar lista de piezas base escaladas proporcionalmente al tamaño de la plancha entera
+    # Un molde estándar ocupa ~1/8 del ancho de la plancha (ajustable con escala_pieza_pct)
+    factor_escala_plancha = (min(w, h) / 680.0) * (escala_pieza_pct / 100.0)
+    factor_escala_plancha = max(0.45, factor_escala_plancha)
 
+    cola_piezas = []
     for m in moldes_elegidos_list:
         nombre_m = m["nombre"]
         cant = m.get("cantidad", 1)
-        base_pts = obtener_puntos_molde_calzado(nombre_m)
+        pts_raw = obtener_puntos_molde_calzado(nombre_m)
+        pts_scaled = (pts_raw * factor_escala_plancha).astype(np.int32)
+        min_xy = np.min(pts_scaled, axis=0)
+        pts_norm = pts_scaled - min_xy
+        area_m = cv2.contourArea(pts_norm)
+        for _ in range(cant):
+            cola_piezas.append({
+                "nombre": nombre_m,
+                "pts": pts_norm,
+                "area": area_m
+            })
 
-        min_xy = np.min(base_pts, axis=0)
-        pts_norm = base_pts - min_xy
+    # Ordenar de mayor a menor área (estrategia Best-Fit Decreasing para aprovechar mejor la plancha)
+    cola_piezas.sort(key=lambda item: item["area"], reverse=True)
+
+    # Si se activa "Llenar toda la plancha", repetir el juego de moldes hasta cubrir toda la piel disponible
+    if llenar_toda_plancha and len(cola_piezas) > 0:
+        area_promedio_pieza = max(1000.0, np.mean([p["area"] for p in cola_piezas]))
+        max_piezas_estimadas = min(45, max(len(cola_piezas), int((area_piel_px * 0.72) / area_promedio_pieza)))
+        cola_expandida = []
+        idx_ciclo = 0
+        while len(cola_expandida) < max_piezas_estimadas:
+            cola_expandida.append(cola_piezas[idx_ciclo % len(cola_piezas)])
+            idx_ciclo += 1
+        cola_piezas = cola_expandida
+
+    piezas_colocadas = []
+    piezas_no_cabieron = []
+    conteo_por_nombre = {}
+    area_ocupada_moldes = 0.0
+
+    # Paso de barrido fino para aprovechar cada hueco de toda la plancha
+    paso_x = max(8, w // 75)
+    paso_y = max(8, h // 65)
+
+    for pieza in cola_piezas:
+        nombre_m = pieza["nombre"]
+        pts_norm = pieza["pts"]
         mw = int(np.max(pts_norm[:, 0]))
         mh = int(np.max(pts_norm[:, 1]))
 
-        for k in range(cant):
-            posicionado = False
-            for angulo in [0, 90, 180, 270]:
+        conteo_por_nombre[nombre_m] = conteo_por_nombre.get(nombre_m, 0) + 1
+        num_instancia = conteo_por_nombre[nombre_m]
+
+        posicionado = False
+        # Probar 4 rotaciones + espejo horizontal para encajar en curvas de toda la plancha
+        variantes = [
+            (pts_norm, mw, mh, "0°"),
+            (np.array([[pt[1], mw - pt[0]] for pt in pts_norm], np.int32), mh, mw, "90°"),
+            (np.array([[mw - pt[0], mh - pt[1]] for pt in pts_norm], np.int32), mw, mh, "180°"),
+            (np.array([[mh - pt[1], pt[0]] for pt in pts_norm], np.int32), mh, mw, "270°"),
+            (np.array([[mw - pt[0], pt[1]] for pt in pts_norm], np.int32), mw, mh, "Espejo")
+        ]
+
+        for pts_rot, cur_w, cur_h, etiq_rot in variantes:
+            if posicionado or cur_w >= w - 16 or cur_h >= h - 16:
+                continue
+
+            for y in range(12, h - cur_h - 12, paso_y):
                 if posicionado:
                     break
-                if angulo == 90:
-                    pts_rot = np.array([[pt[1], mw - pt[0]] for pt in pts_norm], np.int32)
-                    cur_w, cur_h = mh, mw
-                elif angulo == 180:
-                    pts_rot = np.array([[mw - pt[0], mh - pt[1]] for pt in pts_norm], np.int32)
-                    cur_w, cur_h = mw, mh
-                elif angulo == 270:
-                    pts_rot = np.array([[mh - pt[1], pt[0]] for pt in pts_norm], np.int32)
-                    cur_w, cur_h = mh, mw
-                else:
-                    pts_rot = pts_norm.copy()
-                    cur_w, cur_h = mw, mh
+                for x in range(12, w - cur_w - 12, paso_x):
+                    # Verificación rápida de esquinas antes de construir máscara completa
+                    if (ocupado_mask[y, x] > 0 or
+                        ocupado_mask[y + cur_h // 2, x + cur_w // 2] > 0 or
+                        ocupado_mask[min(h - 1, y + cur_h), min(w - 1, x + cur_w)] > 0):
+                        continue
 
-                if cur_w >= w - 20 or cur_h >= h - 20:
-                    continue
+                    pts_tras = pts_rot + np.array([x, y])
+                    temp_mask = np.zeros((h, w), dtype=np.uint8)
+                    cv2.fillPoly(temp_mask, [pts_tras], 255)
 
-                for y in range(15, h - cur_h - 15, 10):
-                    if posicionado:
+                    if np.sum(cv2.bitwise_and(ocupado_mask, temp_mask)) == 0:
+                        # Dibujar pieza ubicada con estilo de patrón de corte limpio
+                        overlay = res_img.copy()
+                        cv2.fillPoly(overlay, [pts_tras], (35, 55, 45))
+                        cv2.addWeighted(overlay, 0.65, res_img, 0.35, 0, res_img)
+                        cv2.polylines(res_img, [pts_tras], True, (0, 230, 115), 3)
+
+                        tag = f"{nombre_m.split('-')[0].strip()} #{num_instancia}"
+                        tx = x + max(6, cur_w // 6)
+                        ty = y + cur_h // 2
+                        cv2.putText(
+                            res_img, tag, (tx, ty),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2
+                        )
+
+                        # Reservar espacio con separación de cuchilla entre moldes
+                        kernel_sep = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (12, 12))
+                        mask_ocupar = cv2.dilate(temp_mask, kernel_sep)
+                        ocupado_mask = cv2.bitwise_or(ocupado_mask, mask_ocupar)
+
+                        area_ocupada_moldes += cv2.contourArea(pts_tras)
+                        posicionado = True
+                        piezas_colocadas.append({
+                            "Pieza": f"{nombre_m} #{num_instancia}",
+                            "Rotación": etiq_rot,
+                            "Coordenada": f"({x}, {y})",
+                            "Estado": "Ubicado OK"
+                        })
                         break
-                    for x in range(15, w - cur_w - 15, 10):
-                        temp_mask = np.zeros((h, w), dtype=np.uint8)
-                        pts_tras = pts_rot + np.array([x, y])
-                        cv2.fillPoly(temp_mask, [pts_tras], 255)
 
-                        if np.sum(cv2.bitwise_and(ocupado_mask, temp_mask)) == 0:
-                            cv2.polylines(res_img, [pts_tras], True, (0, 255, 0), 3)
-                            overlay = res_img.copy()
-                            cv2.fillPoly(overlay, [pts_tras], (0, 230, 115))
-                            cv2.addWeighted(overlay, 0.25, res_img, 0.75, 0, res_img)
+        if not posicionado and not llenar_toda_plancha:
+            piezas_no_cabieron.append(f"{nombre_m} #{num_instancia}")
 
-                            tag = f"{nombre_m[:11]} #{k+1}"
-                            cv2.putText(
-                                res_img, tag,
-                                (x + 10, y + cur_h // 2),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2
-                            )
-
-                            mask_ocupar = np.zeros((h, w), dtype=np.uint8)
-                            cv2.fillPoly(mask_ocupar, [pts_tras], 255)
-                            kernel_exp = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
-                            mask_ocupar = cv2.dilate(mask_ocupar, kernel_exp)
-                            ocupado_mask = cv2.bitwise_or(ocupado_mask, mask_ocupar)
-
-                            posicionado = True
-                            piezas_colocadas.append({
-                                "Pieza": f"{nombre_m} #{k+1}",
-                                "Rotación": f"{angulo}°",
-                                "Coordenada": f"({x}, {y})",
-                                "Estado": "Ubicado OK"
-                            })
-                            break
-
-            if not posicionado:
-                piezas_no_cabieron.append(f"{nombre_m} #{k+1}")
-
+    aprovechamiento_real = min(94.5, round((area_ocupada_moldes / float(area_piel_px)) * 100.0, 1)) if piezas_colocadas else 0.0
     res_img_rgb = cv2.cvtColor(res_img, cv2.COLOR_BGR2RGB)
-    return res_img_rgb, res_img, piezas_colocadas, piezas_no_cabieron
+    return res_img_rgb, res_img, piezas_colocadas, piezas_no_cabieron, aprovechamiento_real
 
 # ------------------------------------------------------------------ Generador de Patrón Imprimible
 def generar_patron_imprimible(res_img_bgr, piezas_colocadas, info_lote):
@@ -656,10 +776,10 @@ def generar_patron_imprimible(res_img_bgr, piezas_colocadas, info_lote):
     lienzo_w = w + (margen_lat * 2)
     hoja = np.ones((lienzo_h, lienzo_w, 3), dtype=np.uint8) * 255
 
-    cv2.putText(hoja, "LEATHER-FLEX 3D - PLANO DE CORTE IMPRIMIBLE", (margen_lat, 45),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (44, 37, 32), 2)
-    cv2.putText(hoja, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Piezas: {len(piezas_colocadas)} | Rendimiento: {info_lote['aprovechamiento_pct']}%",
-                (margen_lat, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 90, 80), 1)
+    cv2.putText(hoja, "LEATHER-FLEX 3D - PLANO DE CORTE DE PLANCHA COMPLETA", (margen_lat, 45),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.85, (44, 37, 32), 2)
+    cv2.putText(hoja, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Moldes: {len(piezas_colocadas)} | Defectos Evitados: {info_lote['defectos']} | Aprovechamiento: {info_lote['aprovechamiento_pct']}%",
+                (margen_lat, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (100, 90, 80), 1)
     cv2.line(hoja, (margen_lat, 95), (lienzo_w - margen_lat, 95), (140, 119, 99), 2)
 
     area_img = res_img_bgr.copy()
@@ -724,10 +844,10 @@ if not os.path.exists(ruta_cal):
     with open(ruta_cal, "w") as f:
         json.dump({"mm_por_px_foto": 0.5, "angulo_grados": 0.0, "matriz_homografia": None}, f)
 
-# ================================================================== MÓDULO 1: CAPTURA DEL CUERO (UNA SOLA OPCIÓN LIMPIA)
+# ================================================================== MÓDULO 1: CAPTURA DEL CUERO
 if opcion_menu == "Captura del Cuero":
     st.title("Captura del Cuero")
-    st.caption("Sube fotos o videos desde tu galería, toma fotos con la cámara de tu dispositivo o graba video. Puedes seguir agregando más archivos antes de guardar.")
+    st.caption("Sube todas las fotos o videos de las secciones de la plancha de cuero. El sistema las unirá en una plancha entera.")
 
     if "bandeja_capturas" not in st.session_state:
         st.session_state["bandeja_capturas"] = []
@@ -735,10 +855,10 @@ if opcion_menu == "Captura del Cuero":
         st.session_state["uploader_key"] = 0
 
     with st.container(border=True):
-        nota_lote = st.text_input("Identificador / Nombre del Lote (Opcional)", placeholder="Ej. Lote Cuero Vacuno Mesa 1", key="nota_unica")
+        nota_lote = st.text_input("Identificador / Nombre de la Plancha (Opcional)", placeholder="Ej. Plancha Cuero Vacuno Completa #1", key="nota_unica")
 
         archivos_nuevos = st.file_uploader(
-            "Seleccionar de la biblioteca, tomar foto o grabar video (puedes elegir varios a la vez)",
+            "Seleccionar de la biblioteca, tomar foto o grabar video (puedes elegir todas las fotos de la plancha)",
             type=["jpg", "png", "jpeg", "webp", "mp4", "mov", "avi", "mkv"],
             accept_multiple_files=True,
             key=f"uploader_unico_{st.session_state['uploader_key']}"
@@ -754,7 +874,7 @@ if opcion_menu == "Captura del Cuero":
 
         if bandeja:
             st.write("---")
-            st.markdown(f"**Archivos cargados ({len(bandeja)}):** Puedes seguir tocando el botón de arriba para tomar o subir más fotos o videos.")
+            st.markdown(f"**Tomas acumuladas para formar la plancha ({len(bandeja)}):**")
             cols_prev = st.columns(4)
             for idx_p, (nom_p, bytes_p) in enumerate(bandeja):
                 with cols_prev[idx_p % 4]:
@@ -766,24 +886,28 @@ if opcion_menu == "Captura del Cuero":
 
             col_g1, col_g2 = st.columns([3, 1])
             with col_g1:
-                if st.button(f"Guardar {len(bandeja)} Archivo(s) y Preparar Análisis", type="primary", use_container_width=True):
+                if st.button(f"Guardar y Unir {len(bandeja)} Toma(s) en Plancha Entera", type="primary", use_container_width=True):
                     rutas_lote = []
                     for idx, (nom_item, bytes_item) in enumerate(bandeja):
-                        etiqueta = f"{nota_lote} #{idx+1}" if nota_lote else f"Captura #{idx+1} ({nom_item})"
+                        etiqueta = f"{nota_lote} - Toma #{idx+1}" if nota_lote else f"Toma #{idx+1} ({nom_item})"
                         ruta_g = guardar_captura_en_bd(nom_item, bytes_item, etiqueta)
                         rutas_lote.append(ruta_g)
 
-                    with st.spinner("Extrayendo fotogramas nítidos para análisis IA..."):
+                    with st.spinner("Extrayendo vistas y ensamblando plancha de cuero completa..."):
                         imagenes_memoria = expandir_archivos_a_imagenes(bandeja)
+                        bytes_plancha, msg_plancha = ensamblar_plancha_completa(imagenes_memoria)
 
                     if imagenes_memoria:
                         st.session_state["lote_pieles_activas"] = rutas_lote
                         st.session_state["imagenes_def_memoria"] = imagenes_memoria
                         st.session_state["pieles_nesting_memoria"] = imagenes_memoria
+                    if bytes_plancha:
+                        st.session_state["plancha_completa_bytes"] = bytes_plancha
+                        st.session_state["plancha_completa_info"] = msg_plancha
 
                     st.session_state["bandeja_capturas"] = []
                     st.session_state["uploader_key"] += 1
-                    st.success(f"{len(bandeja)} archivo(s) guardados y preparados para detección.")
+                    st.success(f"Plancha ensamblada: {msg_plancha}")
                     st.rerun()
 
             with col_g2:
@@ -791,6 +915,12 @@ if opcion_menu == "Captura del Cuero":
                     st.session_state["bandeja_capturas"] = []
                     st.session_state["uploader_key"] += 1
                     st.rerun()
+
+    if st.session_state.get("plancha_completa_bytes"):
+        st.write("---")
+        st.subheader("Vista Previa de Plancha de Cuero Ensamblada")
+        st.caption(st.session_state.get("plancha_completa_info", ""))
+        st.image(st.session_state["plancha_completa_bytes"], use_container_width=True)
 
     st.write("---")
     st.subheader("Historial de Capturas Registradas")
@@ -801,7 +931,7 @@ if opcion_menu == "Captura del Cuero":
     conn.close()
 
     if not posts:
-        st.info("No hay capturas aún. Usa el selector de arriba para subir fotos o videos.")
+        st.info("No hay capturas aún. Usa el selector de arriba para subir las fotos de la plancha.")
     else:
         cols_hist = st.columns(3)
         for idx, p in enumerate(posts):
@@ -818,13 +948,16 @@ if opcion_menu == "Captura del Cuero":
                     if media and os.path.exists(media):
                         if st.button("Seleccionar", key=f"sel_{post_id}", use_container_width=True):
                             st.session_state["ultima_captura_cuero"] = media
-                            st.session_state["lote_pieles_activas"] = [media]
                             with open(media, "rb") as f_sel:
                                 b_sel = f_sel.read()
                             imgs_sel = expandir_archivos_a_imagenes([(os.path.basename(media), b_sel)])
                             st.session_state["imagenes_def_memoria"] = imgs_sel
                             st.session_state["pieles_nesting_memoria"] = imgs_sel
-                            st.toast(f"'{tit}' cargado para análisis IA.")
+                            b_plancha, m_plancha = ensamblar_plancha_completa(imgs_sel)
+                            if b_plancha:
+                                st.session_state["plancha_completa_bytes"] = b_plancha
+                                st.session_state["plancha_completa_info"] = m_plancha
+                            st.toast(f"'{tit}' cargado.")
                 with c2:
                     if st.button("Eliminar", key=f"del_{post_id}", use_container_width=True):
                         conn = sqlite3.connect(DB_PATH)
@@ -842,123 +975,137 @@ if opcion_menu == "Captura del Cuero":
 # ================================================================== MÓDULO 2: DETECCIÓN DE DEFECTOS
 elif opcion_menu == "Detección de Defectos":
     st.title("Detección de Defectos en Rojo")
-    st.caption("Motor de visión artificial con clasificador de IA integrado para fotos y videos (con filtro anti-movimiento).")
+    st.caption("Une todas las fotos en una plancha entera y detecta cada defecto (Rayón, Mancha, Hueco, Picadura) en rojo.")
 
-    col1, col2 = st.columns([1, 1.3])
+    col1, col2 = st.columns([1, 1.35])
     with col1:
-        st.subheader("1. Cargar Imágenes o Videos de Cuero")
+        st.subheader("1. Fotos / Videos de la Plancha")
         archivos_subidos = st.file_uploader(
-            "Sube fotos o videos de pieles para detectar defectos",
+            "Sube todas las fotos o videos de la plancha de cuero",
             type=["jpg", "jpeg", "png", "webp", "mp4", "mov", "avi", "mkv"],
             accept_multiple_files=True,
             key="uploader_defectos_lote"
         )
 
         if archivos_subidos:
-            with st.spinner("Extrayendo fotogramas nítidos..."):
+            with st.spinner("Extrayendo vistas y uniendo plancha..."):
                 raw_files = [(f.name, f.getvalue()) for f in archivos_subidos]
-                st.session_state["imagenes_def_memoria"] = expandir_archivos_a_imagenes(raw_files)
-        elif "imagenes_def_memoria" not in st.session_state and st.session_state.get("ultima_captura_cuero"):
-            ruta_act = st.session_state["ultima_captura_cuero"]
-            if os.path.exists(ruta_act):
-                with open(ruta_act, "rb") as f:
-                    st.session_state["imagenes_def_memoria"] = expandir_archivos_a_imagenes([(os.path.basename(ruta_act), f.read())])
+                imgs_exp = expandir_archivos_a_imagenes(raw_files)
+                st.session_state["imagenes_def_memoria"] = imgs_exp
+                st.session_state["pieles_nesting_memoria"] = imgs_exp
 
         imagenes_actuales = st.session_state.get("imagenes_def_memoria", [])
+
+        cols_cuadricula = st.number_input(
+            "Columnas para unir las fotos (0 = Automático según cantidad de fotos)",
+            min_value=0, max_value=12, value=0, step=1
+        )
+
         if imagenes_actuales:
-            st.info(f"Listas para analizar: **{len(imagenes_actuales)} vista(s) / fotograma(s) nítidos**")
-            if st.button("Limpiar archivos cargados"):
+            st.info(f"Tomas cargadas: **{len(imagenes_actuales)} foto(s)** listas para unir en una plancha entera.")
+            if st.button("Limpiar fotos cargadas"):
                 st.session_state["imagenes_def_memoria"] = []
                 st.session_state["resultados_defectos_lote"] = []
+                st.session_state["plancha_completa_bytes"] = None
                 st.rerun()
 
         sensibilidad = st.slider(
-            "Sensibilidad de detección IA (75 recomendado para marcas finas y picaduras)",
+            "Sensibilidad de detección IA (75 recomendado)",
             min_value=20, max_value=100, value=75, step=5
         )
 
         btn_analizar = st.button(
-            f"Detectar Defectos en {len(imagenes_actuales)} Vista(s)",
+            f"Unir {len(imagenes_actuales)} Foto(s) y Detectar Defectos en Plancha Completa",
             type="primary",
             use_container_width=True,
             disabled=(len(imagenes_actuales) == 0)
         )
 
     with col2:
-        st.subheader("2. Resultados e Identificación de Errores")
+        st.subheader("2. Plancha Completa y Defectos Detectados")
         if btn_analizar and imagenes_actuales:
-            resultados = []
-            progreso = st.progress(0)
-            for i, (nom, b_img) in enumerate(imagenes_actuales):
-                img_viz_rgb, obst, rep, err = detectar_defectos_cuero(b_img, sensibilidad=sensibilidad)
-                resultados.append({
-                    "nombre": nom,
+            with st.spinner("Uniendo fotos en plancha completa y ejecutando IA de detección..."):
+                bytes_plancha, info_ensamble = ensamblar_plancha_completa(imagenes_actuales, columnas_cuadricula=cols_cuadricula)
+                st.session_state["plancha_completa_bytes"] = bytes_plancha
+                st.session_state["plancha_completa_info"] = info_ensamble
+
+                img_viz_rgb, obst, rep, err = detectar_defectos_cuero(bytes_plancha, sensibilidad=sensibilidad)
+                st.session_state["resultado_plancha_defectos"] = {
+                    "info_ensamble": info_ensamble,
+                    "num_fotos": len(imagenes_actuales),
                     "img_viz": img_viz_rgb,
                     "reporte": rep,
                     "obstaculos": obst,
-                    "bytes_orig": b_img,
+                    "bytes_plancha": bytes_plancha,
                     "error": err
-                })
-                progreso.progress((i + 1) / len(imagenes_actuales))
-            st.session_state["resultados_defectos_lote"] = resultados
-            if resultados and resultados[0]["error"] is None:
-                st.session_state["defectos_guardados"] = resultados[0]
+                }
 
-        res_lote = st.session_state.get("resultados_defectos_lote", [])
-        if res_lote:
-            for item in res_lote:
-                st.markdown(f"### Vista: `{item['nombre']}`")
-                if item["error"]:
-                    st.error(item["error"])
+        res_plancha = st.session_state.get("resultado_plancha_defectos")
+        if res_plancha:
+            if res_plancha["error"]:
+                st.error(res_plancha["error"])
+            else:
+                st.caption(res_plancha["info_ensamble"])
+                m_def = st.columns(2)
+                m_def[0].metric("Fotos Unidas", res_plancha["num_fotos"])
+                m_def[1].metric("Defectos Detectados", len(res_plancha["reporte"]))
+
+                if len(res_plancha["reporte"]) == 0:
+                    st.warning("No se detectaron defectos con la sensibilidad actual. Sube el slider a 80-90.")
                 else:
-                    if len(item["reporte"]) == 0:
-                        st.warning("No se detectaron defectos con la sensibilidad actual. Sube el slider a 80-90.")
-                    else:
-                        st.success(f"IA identificó **{len(item['reporte'])} defecto(s)** marcados en rojo.")
-                    st.image(item["img_viz"], use_container_width=True, caption="Imperfecciones marcadas en rojo")
-                    if item["reporte"]:
-                        st.dataframe(
-                            [{
-                                "ID": f"D{d['id']}",
-                                "Diagnóstico IA": d["tipo"],
-                                "Confianza": d["confianza"],
-                                "Ubicación": d["ubicacion"],
-                                "Área (px²)": d["area_px2"]
-                            } for d in item["reporte"]],
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                st.divider()
-        else:
-            st.info("Sube fotos o videos en el panel izquierdo y presiona el botón para iniciar.")
+                    st.success(f"IA identificó **{len(res_plancha['reporte'])} defecto(s)** marcados en rojo sobre la plancha completa.")
 
-# ================================================================== MÓDULO 3: ACOMODO DE MOLDES Y PATRÓN IMPRIMIBLE
+                st.image(res_plancha["img_viz"], use_container_width=True, caption="Plancha completa con defectos marcados en rojo")
+
+                if res_plancha["reporte"]:
+                    st.dataframe(
+                        [{
+                            "ID": f"D{d['id']}",
+                            "Diagnóstico IA": d["tipo"],
+                            "Confianza": d["confianza"],
+                            "Ubicación": d["ubicacion"],
+                            "Área (px²)": d["area_px2"]
+                        } for d in res_plancha["reporte"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+        else:
+            st.info("Carga las fotos de la plancha en el panel izquierdo y presiona el botón para unirlas y detectar defectos.")
+
+# ================================================================== MÓDULO 3: ACOMODO DE MOLDES EN TODA LA PLANCHA
 elif opcion_menu == "Acomodo de Moldes":
-    st.title("Acomodo Óptimo de Moldes y Plano Imprimible")
-    st.caption("Distribuye los moldes dentro de la piel evitando los defectos rojos y descarga el patrón listo para imprimir.")
+    st.title("Acomodo de Moldes en Toda la Plancha")
+    st.caption("Junta todas las fotos en una sola plancha de cuero, identifica los defectos en rojo y distribuye los moldes abarcando TODA la superficie disponible.")
 
     col_a, col_b = st.columns([1, 1])
     with col_a:
-        st.subheader("1. Pieles para Distribución")
+        st.subheader("1. Fotos de la Plancha Completa")
         fotos_nest = st.file_uploader(
-            "Sube fotos o videos de pieles para acomodar moldes",
+            "Sube todas las fotos o videos que forman la plancha de cuero",
             type=["jpg", "jpeg", "png", "webp", "mp4", "mov", "avi", "mkv"],
             accept_multiple_files=True,
             key="uploader_nesting_multi"
         )
         if fotos_nest:
-            with st.spinner("Extrayendo vistas nítidas..."):
-                st.session_state["pieles_nesting_memoria"] = expandir_archivos_a_imagenes([(f.name, f.getvalue()) for f in fotos_nest])
+            with st.spinner("Preparando tomas de la plancha..."):
+                imgs_n = expandir_archivos_a_imagenes([(f.name, f.getvalue()) for f in fotos_nest])
+                st.session_state["pieles_nesting_memoria"] = imgs_n
+                st.session_state["imagenes_def_memoria"] = imgs_n
         elif "pieles_nesting_memoria" not in st.session_state and st.session_state.get("imagenes_def_memoria"):
             st.session_state["pieles_nesting_memoria"] = st.session_state["imagenes_def_memoria"]
 
         pieles_nest = st.session_state.get("pieles_nesting_memoria", [])
         if pieles_nest:
-            st.success(f"{len(pieles_nest)} vista(s) de piel listas para distribución automática.")
+            st.success(f"**{len(pieles_nest)} foto(s)** listas para unirse en una sola plancha entera.")
+
+        cols_cuad_nest = st.number_input(
+            "Columnas de unión de plancha (0 = Automático)",
+            min_value=0, max_value=12, value=0, step=1, key="cols_cuad_nest"
+        )
         demo = st.button("Usar Muestra de Prueba (Demo)")
 
     with col_b:
-        st.subheader("2. Selección de Moldes y Margen")
+        st.subheader("2. Moldes y Aprovechamiento de Plancha")
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("SELECT id, nombre, cliente, dimensiones, archivo_dxf FROM moldes ORDER BY id ASC")
@@ -969,18 +1116,23 @@ elif opcion_menu == "Acomodo de Moldes":
         if moldes_bd:
             mapa_dxf = {f"{m[1]} ({m[3]})": (m[1], m[4]) for m in moldes_bd}
             opciones = list(mapa_dxf.keys())
-            elegidos = st.multiselect("Piezas a distribuir:", options=opciones, default=opciones)
+            elegidos = st.multiselect("Piezas a distribuir en la plancha:", options=opciones, default=opciones)
             for item_nom in elegidos:
                 nom_real, path_dxf = mapa_dxf[item_nom]
-                cant = st.number_input(f"Cantidad de '{nom_real}'", min_value=1, max_value=30, value=1, key=f"cant_nest_{item_nom}")
+                cant = st.number_input(f"Cantidad mínima de '{nom_real}'", min_value=1, max_value=30, value=1, key=f"cant_nest_{item_nom}")
                 moldes_seleccionados.append({"nombre": nom_real, "cantidad": cant, "dxf_path": path_dxf})
 
-        margen_seg = st.slider("Margen de seguridad alrededor de defectos (px)", 5, 45, 18, 5)
+        llenar_toda = st.checkbox(
+            "Abarcar toda la plancha automáticamente (repetir moldes hasta llenar toda la piel sana)",
+            value=True
+        )
+        escala_pieza = st.slider("Tamaño relativo de los moldes en la plancha (%)", 60, 150, 100, 10)
+        margen_seg = st.slider("Distancia mínima alrededor de defectos (px)", 5, 45, 16, 2)
         sens_nest = st.slider("Sensibilidad detección IA", 20, 100, 75, 5, key="sens_nest")
 
     st.write("---")
     puede_procesar = (len(pieles_nest) > 0 or demo) and len(moldes_seleccionados) > 0
-    if st.button("Calcular Distribución Óptima y Generar Plano Imprimible", type="primary", use_container_width=True, disabled=not puede_procesar):
+    if st.button("Unir Plancha Completa, Detectar Defectos y Acomodar Moldes", type="primary", use_container_width=True, disabled=not puede_procesar):
         lista_a_procesar = list(pieles_nest)
         if demo and not lista_a_procesar:
             carpeta_demo = os.path.join(TMP, "demo")
@@ -990,72 +1142,75 @@ elif opcion_menu == "Acomodo de Moldes":
             with open(p_demo, "rb") as fd:
                 lista_a_procesar = [("Muestra_Demo.jpg", fd.read())]
 
-        resultados_nesting = []
-        for nom_p, bytes_p in lista_a_procesar:
-            _, obst, rep_def, err = detectar_defectos_cuero(bytes_p, sensibilidad=sens_nest)
+        with st.spinner("Reconstruyendo plancha entera, detectando defectos y distribuyendo moldes en toda la superficie..."):
+            bytes_plancha_entera, info_ensamble = ensamblar_plancha_completa(lista_a_procesar, columnas_cuadricula=cols_cuad_nest)
+            _, obst, rep_def, err = detectar_defectos_cuero(bytes_plancha_entera, sensibilidad=sens_nest)
+
             if err:
-                resultados_nesting.append({"nombre": nom_p, "error": err})
-                continue
+                st.session_state["resultado_nesting_plancha"] = {"error": err}
+            else:
+                res_img_rgb, res_img_bgr, colocadas, no_cabieron, aprov_real = ubicar_moldes_en_toda_la_plancha(
+                    bytes_plancha_entera,
+                    rep_def,
+                    moldes_seleccionados,
+                    margen_cuchilla=margen_seg,
+                    llenar_toda_plancha=llenar_toda,
+                    escala_pieza_pct=escala_pieza
+                )
+                h, w, _ = res_img_rgb.shape
+                info_lote = {
+                    "fotos_unidas": len(lista_a_procesar),
+                    "info_ensamble": info_ensamble,
+                    "piel_m2": round((w * h) / 1000000, 2),
+                    "defectos": len(rep_def),
+                    "piezas": len(colocadas),
+                    "aprovechamiento_pct": aprov_real
+                }
+                png_imprimible = generar_patron_imprimible(res_img_bgr, colocadas, info_lote)
+                st.session_state["resultado_nesting_plancha"] = {
+                    "error": None,
+                    "res_img": res_img_rgb,
+                    "colocadas": colocadas,
+                    "no_cabieron": no_cabieron,
+                    "info": info_lote,
+                    "png_imprimible": png_imprimible
+                }
 
-            res_img_rgb, res_img_bgr, colocadas, no_cabieron = ubicar_moldes_en_piel(
-                bytes_p, rep_def, moldes_seleccionados, margen_cuchilla=margen_seg
-            )
-            h, w, _ = res_img_rgb.shape
-            aprov = min(95.0, round(68.0 + (len(colocadas) * 5.5), 1)) if colocadas else 0.0
-            info_lote = {
-                "piel_m2": round((w * h) / 1000000, 2),
-                "defectos": len(rep_def),
-                "piezas": len(colocadas),
-                "aprovechamiento_pct": aprov
-            }
-            png_imprimible = generar_patron_imprimible(res_img_bgr, colocadas, info_lote)
-            resultados_nesting.append({
-                "nombre": nom_p,
-                "error": None,
-                "res_img": res_img_rgb,
-                "colocadas": colocadas,
-                "no_cabieron": no_cabieron,
-                "info": info_lote,
-                "png_imprimible": png_imprimible
-            })
-        st.session_state["resultados_nesting_lote"] = resultados_nesting
-
-    res_nest_lote = st.session_state.get("resultados_nesting_lote", [])
-    if res_nest_lote:
-        for idx_r, rn in enumerate(res_nest_lote):
-            st.subheader(f"Distribución en: {rn['nombre']}")
-            if rn["error"]:
-                st.error(rn["error"])
-                continue
-
+    rn = st.session_state.get("resultado_nesting_plancha")
+    if rn:
+        if rn["error"]:
+            st.error(rn["error"])
+        else:
             info = rn["info"]
+            st.caption(info["info_ensamble"])
+            st.success(f"Listo: **{info['piezas']} moldes ubicados** abarcando toda la plancha, ninguno sobre un defecto.")
+
             m = st.columns(4)
-            m[0].metric("Área de Piel", f"{info['piel_m2']} m²")
+            m[0].metric("Fotos Unidas", info["fotos_unidas"])
             m[1].metric("Defectos Evitados", info["defectos"])
-            m[2].metric("Piezas Ubicadas", info["piezas"])
+            m[2].metric("Moldes Ubicados", info["piezas"])
             m[3].metric("Aprovechamiento", f"{info['aprovechamiento_pct']} %")
 
             if rn["no_cabieron"]:
-                st.warning(f"No hubo espacio libre suficiente para: {', '.join(rn['no_cabieron'])}. Reduce el margen de seguridad o la cantidad de piezas.")
+                st.warning(f"No hubo espacio libre suficiente para: {', '.join(rn['no_cabieron'])}. Reduce el tamaño relativo o el margen de seguridad.")
 
-            st.image(rn["res_img"], use_container_width=True, caption="Verde: Piezas ubicadas | Rojo: Defectos evitados")
+            st.image(rn["res_img"], use_container_width=True, caption="Moldes ubicados lejos de los defectos abarcando toda la plancha")
 
             col_tbl, col_imp = st.columns([1.4, 1])
             with col_tbl:
                 if rn["colocadas"]:
-                    st.write("**Detalle de Distribución:**")
+                    st.write("**Detalle de Distribución en Plancha:**")
                     st.dataframe(rn["colocadas"], use_container_width=True, hide_index=True)
             with col_imp:
-                st.write("**Exportar Plano para Taller:**")
+                st.write("**Exportar Plan de Corte:**")
                 if rn["png_imprimible"]:
                     st.download_button(
-                        label="Descargar Patrón Imprimible (PNG Alta Res.)",
+                        label="Descargar Plan de Corte Imprimible (PNG)",
                         data=rn["png_imprimible"],
-                        file_name=f"Patron_Corte_{rn['nombre'].split('.')[0]}.png",
+                        file_name="Plan_Corte_Plancha_Completa.png",
                         mime="image/png",
                         type="primary",
-                        use_container_width=True,
-                        key=f"dl_png_{idx_r}"
+                        use_container_width=True
                     )
                 pts_dxf_all = []
                 for m_sel in moldes_seleccionados:
@@ -1063,12 +1218,10 @@ elif opcion_menu == "Acomodo de Moldes":
                 st.download_button(
                     label="Descargar Vector CAD (DXF)",
                     data=generar_contenido_dxf(pts_dxf_all),
-                    file_name=f"Corte_CAD_{rn['nombre'].split('.')[0]}.dxf",
+                    file_name="Plan_Corte_Plancha.dxf",
                     mime="application/dxf",
-                    use_container_width=True,
-                    key=f"dl_dxf_{idx_r}"
+                    use_container_width=True
                 )
-            st.divider()
 
 # ================================================================== MÓDULO 4: CATÁLOGO DE MOLDES
 elif opcion_menu == "Catálogo de Moldes":
