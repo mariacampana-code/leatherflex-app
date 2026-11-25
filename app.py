@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Ensamblaje de Plancha Completa, IA de Defectos, Digitalizador Foto->DXF y Catálogo Integral"""
+"""Leather-Flex 3D - Ensamblaje de Plancha Completa, IA de Defectos, Digitalizador Foto->DXF y Plano Imprimible de Taller"""
 import os
 import math
 import json
@@ -309,7 +309,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------------------------------------------------------ Geometría Curva de Moldes (Calzado, Cartera, Casaca y DXF)
+# ------------------------------------------------------------------ Geometría Curva de Moldes
 def suavizar_contorno(puntos, num_puntos=100):
     pts = np.array(puntos, dtype=np.float32)
     pts = np.vstack([pts, pts[0]])
@@ -322,7 +322,6 @@ def suavizar_contorno(puntos, num_puntos=100):
     return np.column_stack([x_smooth, y_smooth]).astype(np.int32)
 
 def leer_puntos_desde_dxf(ruta_dxf):
-    """Lee vértices POLYLINE de un archivo DXF guardado en el catálogo."""
     if not ruta_dxf or not os.path.exists(ruta_dxf):
         return None
     try:
@@ -352,7 +351,6 @@ def leer_puntos_desde_dxf(ruta_dxf):
     return None
 
 def obtener_puntos_molde(tipo, ruta_dxf=None):
-    """Retorna el contorno vectorial del molde (Calzado, Cartera, Casaca o DXF digitalizado)."""
     if ruta_dxf:
         pts_dxf = leer_puntos_desde_dxf(ruta_dxf)
         if pts_dxf is not None and len(pts_dxf) >= 3:
@@ -360,7 +358,7 @@ def obtener_puntos_molde(tipo, ruta_dxf=None):
 
     tipo_l = tipo.lower()
 
-    # --- CALZADO ---
+    # Calzado
     if "frente" in tipo_l or "capellada" in tipo_l:
         pts = [
             [20, 0], [70, 35], [120, 45], [170, 35], [220, 0],
@@ -390,7 +388,7 @@ def obtener_puntos_molde(tipo, ruta_dxf=None):
         ]
         return suavizar_contorno(pts, 100)
 
-    # --- CARTERA / BOLSO ---
+    # Cartera / Bolso
     elif "cuerpo principal" in tipo_l or ("cartera" in tipo_l and "cuerpo" in tipo_l):
         pts = [
             [20, 0], [240, 0], [260, 25], [250, 180],
@@ -416,7 +414,7 @@ def obtener_puntos_molde(tipo, ruta_dxf=None):
         ]
         return suavizar_contorno(pts, 60)
 
-    # --- CASACA / CHAQUETA ---
+    # Casaca / Chaqueta
     elif "pechera" in tipo_l or "delantera" in tipo_l:
         pts = [
             [45, 0], [115, 18], [155, 75], [145, 145],
@@ -445,10 +443,6 @@ def obtener_puntos_molde(tipo, ruta_dxf=None):
     return np.array([[0, 0], [160, 0], [150, 90], [10, 90]], np.int32)
 
 def vectorizar_foto_molde_a_dxf(bytes_imagen, ancho_real_mm=220):
-    """
-    Convierte la foto de un molde físico (cartón/papel/cuero) en un contorno
-    vectorial suavizado escalado a milímetros reales y listo para exportar a DXF.
-    """
     arr = np.frombuffer(bytes_imagen, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
@@ -460,11 +454,9 @@ def vectorizar_foto_molde_a_dxf(bytes_imagen, ancho_real_mm=220):
         img = cv2.resize(img, (int(w * esc), int(h * esc)))
         h, w = img.shape[:2]
 
-    # Segmentar el molde físico del fondo usando contraste de luminancia y saturación
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (9, 9), 0)
 
-    # Evaluar bordes vs centro para detectar si el fondo es claro u oscuro
     borde_val = np.mean([blur[0, :], blur[-1, :], blur[:, 0], blur[:, -1]])
     centro_val = np.mean(blur[h // 4 : 3 * h // 4, w // 4 : 3 * w // 4])
 
@@ -473,12 +465,9 @@ def vectorizar_foto_molde_a_dxf(bytes_imagen, ancho_real_mm=220):
     else:
         _, mask = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # Limpiar ruido y cerrar contorno
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-
-    # Ignorar contornos pegados al marco de la foto
     cv2.rectangle(mask, (0, 0), (w, h), 0, 6)
 
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -493,7 +482,6 @@ def vectorizar_foto_molde_a_dxf(bytes_imagen, ancho_real_mm=220):
     approx = cv2.approxPolyDP(c_mayor, 0.004 * peri, True)
     pts_raw = approx.reshape(-1, 2).astype(np.float32)
 
-    # Normalizar a origen (0, 0) y escalar al ancho real en milímetros indicado por el marroquinero
     min_xy = np.min(pts_raw, axis=0)
     pts_norm = pts_raw - min_xy
     max_w_px = max(1.0, float(np.max(pts_norm[:, 0])))
@@ -533,24 +521,20 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, titulo TEXT, 
                   descripcion TEXT, tipo_falla TEXT, solucion TEXT, fecha TEXT, media_path TEXT)''')
 
-    # Verificar si ya existen las 3 categorías base (Calzado, Cartera, Casaca)
     c.execute("SELECT COUNT(*) FROM moldes WHERE cliente IN ('Calzado', 'Cartera', 'Casaca')")
     if c.fetchone()[0] < 12:
         c.execute("DELETE FROM moldes WHERE origen = 'vector'")
         carp_dxf = os.path.join(TMP, "moldes_catalogo")
         os.makedirs(carp_dxf, exist_ok=True)
         catalogo_inicial = [
-            # Calzado
             ("Frente - Capellada", "Calzado", "240 x 140 mm", obtener_puntos_molde("Frente - Capellada")),
             ("Talón - Posterior", "Calzado", "220 x 95 mm", obtener_puntos_molde("Talón - Posterior")),
             ("Interior de Suela", "Calzado", "110 x 345 mm", obtener_puntos_molde("Interior de Suela")),
             ("Suela - Base", "Calzado", "110 x 340 mm", obtener_puntos_molde("Suela - Base")),
-            # Cartera
             ("Cartera - Cuerpo Principal", "Cartera", "260 x 205 mm", obtener_puntos_molde("Cartera - Cuerpo Principal")),
             ("Cartera - Solapa Frontal", "Cartera", "220 x 130 mm", obtener_puntos_molde("Cartera - Solapa Frontal")),
             ("Cartera - Fuelle Lateral", "Cartera", "80 x 185 mm", obtener_puntos_molde("Cartera - Fuelle Lateral")),
             ("Cartera - Asa / Correa", "Cartera", "270 x 28 mm", obtener_puntos_molde("Cartera - Asa / Correa")),
-            # Casaca
             ("Casaca - Pechera Delantera", "Casaca", "155 x 285 mm", obtener_puntos_molde("Casaca - Pechera Delantera")),
             ("Casaca - Espalda Completa", "Casaca", "225 x 275 mm", obtener_puntos_molde("Casaca - Espalda Completa")),
             ("Casaca - Manga Anatómica", "Casaca", "115 x 280 mm", obtener_puntos_molde("Casaca - Manga Anatómica")),
@@ -762,6 +746,11 @@ def detectar_defectos_cuero(bytes_imagen, sensibilidad=75):
 
 # ------------------------------------------------------------------ Motor de Distribución Integral en TODA la Plancha
 def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegidos_list, margen_cuchilla=16, llenar_toda_plancha=True, escala_pieza_pct=100):
+    """
+    Acomoda los moldes en TODA la plancha de cuero y devuelve además los datos
+    geométricos exactos (contorno de piel, polígonos de cada molde y defectos)
+    para generar la Hoja Técnica Imprimible de Taller (fondo blanco, alto contraste).
+    """
     arr = np.frombuffer(bytes_imagen, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     h_orig, w_orig = img.shape[:2]
@@ -777,20 +766,28 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
     area_piel_px = max(1, int(np.sum(mask_piel == 255)))
     ocupado_mask = cv2.bitwise_not(mask_piel)
 
+    defectos_geometria = []
     for d in bboxes_defectos:
         bx, by, bw_d, bh_d = d["bbox"]
         cx, cy = bx + bw_d // 2, by + bh_d // 2
         radio_vis = max(14, int(max(bw_d, bh_d) * 0.65))
         radio_seg = radio_vis + margen_cuchilla
+        etiq_def = d["tipo"].split("/")[0].strip()
 
         cv2.circle(res_img, (cx, cy), radio_vis, (0, 0, 255), 3)
         cv2.putText(
-            res_img,
-            d["tipo"].split("/")[0].strip(),
+            res_img, etiq_def,
             (max(4, cx - radio_vis), max(18, cy - radio_vis - 6)),
             cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 0, 255), 2
         )
         cv2.circle(ocupado_mask, (cx, cy), radio_seg, 255, -1)
+        defectos_geometria.append({
+            "id": d["id"],
+            "cx": cx,
+            "cy": cy,
+            "radio": radio_vis,
+            "tipo": etiq_def
+        })
 
     factor_escala_plancha = (min(w, h) / 680.0) * (escala_pieza_pct / 100.0)
     factor_escala_plancha = max(0.45, factor_escala_plancha)
@@ -826,8 +823,10 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
 
     piezas_colocadas = []
     piezas_no_cabieron = []
+    piezas_geometria = []
     conteo_por_nombre = {}
     area_ocupada_moldes = 0.0
+    num_global = 1
 
     paso_x = max(8, w // 75)
     paso_y = max(8, h // 65)
@@ -873,12 +872,12 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
                         cv2.addWeighted(overlay, 0.65, res_img, 0.35, 0, res_img)
                         cv2.polylines(res_img, [pts_tras], True, (0, 230, 115), 3)
 
-                        tag = f"{nombre_m.split('-')[0].strip()} #{num_instancia}"
+                        tag = f"#{num_global} {nombre_m.split('-')[0].strip()}"
                         tx = x + max(6, cur_w // 6)
                         ty = y + cur_h // 2
                         cv2.putText(
                             res_img, tag, (tx, ty),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 2
                         )
 
                         kernel_sep = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (12, 12))
@@ -888,11 +887,23 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
                         area_ocupada_moldes += cv2.contourArea(pts_tras)
                         posicionado = True
                         piezas_colocadas.append({
-                            "Pieza": f"{nombre_m} #{num_instancia}",
+                            "N°": f"#{num_global}",
+                            "Pieza": f"{nombre_m} ({num_instancia})",
                             "Rotación": etiq_rot,
-                            "Coordenada": f"({x}, {y})",
-                            "Estado": "Ubicado OK"
+                            "Posición": f"X:{x}, Y:{y}",
+                            "Estado": "Listo para cortar"
                         })
+                        piezas_geometria.append({
+                            "num": num_global,
+                            "nombre": nombre_m,
+                            "rotacion": etiq_rot,
+                            "pts": pts_tras,
+                            "cx": x + cur_w // 2,
+                            "cy": y + cur_h // 2,
+                            "w": cur_w,
+                            "h": cur_h
+                        })
+                        num_global += 1
                         break
 
         if not posicionado and not llenar_toda_plancha:
@@ -900,41 +911,165 @@ def ubicar_moldes_en_toda_la_plancha(bytes_imagen, bboxes_defectos, moldes_elegi
 
     aprovechamiento_real = min(94.5, round((area_ocupada_moldes / float(area_piel_px)) * 100.0, 1)) if piezas_colocadas else 0.0
     res_img_rgb = cv2.cvtColor(res_img, cv2.COLOR_BGR2RGB)
-    return res_img_rgb, res_img, piezas_colocadas, piezas_no_cabieron, aprovechamiento_real
 
-# ------------------------------------------------------------------ Generador de Patrón Imprimible
-def generar_patron_imprimible(res_img_bgr, piezas_colocadas, info_lote):
+    datos_plano = {
+        "w": w,
+        "h": h,
+        "mask_piel": mask_piel,
+        "piezas_geom": piezas_geometria,
+        "defectos_geom": defectos_geometria,
+        "res_img_bgr": res_img
+    }
+    return res_img_rgb, datos_plano, piezas_colocadas, piezas_no_cabieron, aprovechamiento_real
+
+# ------------------------------------------------------------------ Generadores de Planos Imprimibles para el Marroquinero
+def generar_hoja_tecnica_imprimible(datos_plano, piezas_colocadas, info_lote):
+    """
+    Genera una HOJA TÉCNICA DE CORTE DE ALTO CONTRASTE (Fondo Blanco Puro - Ahorro de Tinta)
+    diseñada específicamente para imprimir en papel y guiar al marroquinero paso a paso:
+    - Silueta limpia de la plancha de cuero
+    - Defectos tachados con 'X' roja y nombre claro
+    - Moldes numerados (#1, #2, #3...) con línea punteada interna de costura y flecha de dirección
+    - Tabla resumen al pie con el número, nombre de pieza y orientación de corte
+    """
+    w = datos_plano["w"]
+    h = datos_plano["h"]
+    mask_piel = datos_plano["mask_piel"]
+    piezas_geom = datos_plano["piezas_geom"]
+    defectos_geom = datos_plano["defectos_geom"]
+
+    margen_lat = 60
+    margen_sup = 145
+    filas_leyenda = math.ceil(max(1, len(piezas_colocadas)) / 3)
+    alto_leyenda = 130 + (filas_leyenda * 28)
+
+    lienzo_w = max(1000, w + margen_lat * 2)
+    lienzo_h = h + margen_sup + alto_leyenda
+    offset_x = (lienzo_w - w) // 2
+
+    # Hoja blanca pura para impresión nítida sin gastar tinta
+    hoja = np.ones((lienzo_h, lienzo_w, 3), dtype=np.uint8) * 255
+
+    # Encabezado técnico
+    cv2.rectangle(hoja, (30, 20), (lienzo_w - 30, 125), (35, 35, 35), 2)
+    cv2.putText(hoja, "PLANO DE CORTE PARA TALLER - LEATHER-FLEX 3D", (50, 58),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.92, (20, 20, 20), 2)
+    cv2.putText(
+        hoja,
+        f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}   |   Total Piezas: {len(piezas_colocadas)}   |   Defectos Evitados: {len(defectos_geom)}   |   Aprovechamiento: {info_lote['aprovechamiento_pct']}%",
+        (50, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (60, 60, 60), 1
+    )
+    cv2.putText(
+        hoja,
+        "GUIA RAPIDA: Cortar por la linea negra gruesa (#1, #2...). NO cortar zonas tachadas en rojo (X).",
+        (50, 116), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 100, 50), 1
+    )
+
+    # Área del plano con cuadrícula milimétrica suave (50 px)
+    area_plano = np.ones((h, w, 3), dtype=np.uint8) * 255
+    for gx in range(0, w, 50):
+        cv2.line(area_plano, (gx, 0), (gx, h), (235, 235, 235), 1)
+    for gy in range(0, h, 50):
+        cv2.line(area_plano, (0, gy), (w, gy), (235, 235, 235), 1)
+
+    # Dibujar contorno de la plancha de cuero en tono crema muy suave y borde marrón definido
+    cnts_piel, _ = cv2.findContours(mask_piel, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if cnts_piel:
+        cv2.drawContours(area_plano, cnts_piel, -1, (242, 246, 250), -1)
+        cv2.drawContours(area_plano, cnts_piel, -1, (110, 90, 75), 3)
+
+    # Dibujar defectos prohibidos con círculo rojo + 'X' grande para que el artesano los identifique al instante
+    for d in defectos_geom:
+        cx, cy, r = d["cx"], d["cy"], d["radio"]
+        cv2.circle(area_plano, (cx, cy), r, (220, 220, 255), -1)
+        cv2.circle(area_plano, (cx, cy), r, (0, 0, 220), 2)
+        d_x = int(r * 0.65)
+        cv2.line(area_plano, (cx - d_x, cy - d_x), (cx + d_x, cy + d_x), (0, 0, 220), 2)
+        cv2.line(area_plano, (cx - d_x, cy + d_x), (cx + d_x, cy - d_x), (0, 0, 220), 2)
+        cv2.putText(
+            area_plano, f"X {d['tipo']}",
+            (max(4, cx - r), max(16, cy - r - 5)),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 0, 210), 2
+        )
+
+    # Dibujar cada molde con línea de corte negra gruesa, línea punteada de costura, flecha de hilo y número grande
+    for p in piezas_geom:
+        pts = p["pts"]
+        # Relleno blanco limpio sobre la plancha para máxima legibilidad al imprimir
+        cv2.fillPoly(area_plano, [pts], (255, 255, 255))
+        # Contorno exterior de cuchilla (línea negra gruesa)
+        cv2.polylines(area_plano, [pts], True, (15, 15, 15), 3)
+
+        # Línea interna de referencia de costura / margen
+        centro = np.array([p["cx"], p["cy"]], dtype=np.float32)
+        pts_int = (centro + (pts.astype(np.float32) - centro) * 0.86).astype(np.int32)
+        for idx_pt in range(0, len(pts_int), 2):
+            pt_a = tuple(pts_int[idx_pt])
+            pt_b = tuple(pts_int[(idx_pt + 1) % len(pts_int)])
+            cv2.line(area_plano, pt_a, pt_b, (130, 130, 130), 1)
+
+        # Flecha de dirección / orientación del molde
+        flecha_len = max(14, min(p["w"], p["h"]) // 4)
+        if p["rotacion"] in ("90°", "270°"):
+            cv2.arrowedLine(area_plano, (p["cx"] - flecha_len, p["cy"] + 16), (p["cx"] + flecha_len, p["cy"] + 16), (80, 80, 80), 1, tipLength=0.25)
+        else:
+            cv2.arrowedLine(area_plano, (p["cx"] - 18, p["cy"] - flecha_len), (p["cx"] - 18, p["cy"] + flecha_len), (80, 80, 80), 1, tipLength=0.25)
+
+        # Número grande de pieza (#1, #2...) y nombre corto
+        num_txt = f"#{p['num']}"
+        nom_corto = p["nombre"].split("-")[0].strip()[:12]
+        cv2.putText(area_plano, num_txt, (p["cx"] - 14, p["cy"] - 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.68, (0, 0, 0), 2)
+        cv2.putText(area_plano, nom_corto, (max(4, p["cx"] - 32), p["cy"] + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (40, 40, 40), 1)
+
+    hoja[margen_sup:margen_sup + h, offset_x:offset_x + w] = area_plano
+    cv2.rectangle(hoja, (offset_x, margen_sup), (offset_x + w, margen_sup + h), (30, 30, 30), 2)
+
+    # Marcas de registro de esquina para alinear hojas impresas
+    for cx, cy in [(offset_x, margen_sup), (offset_x + w, margen_sup),
+                   (offset_x, margen_sup + h), (offset_x + w, margen_sup + h)]:
+        cv2.circle(hoja, (cx, cy), 9, (0, 0, 0), 2)
+
+    # Tabla guía de piezas al pie de la hoja para lectura fácil del marroquinero
+    y_ley = margen_sup + h + 30
+    cv2.line(hoja, (30, y_ley - 12), (lienzo_w - 30, y_ley - 12), (40, 40, 40), 2)
+    cv2.putText(hoja, "LISTA DE PIEZAS A CORTAR (BUSCAR EL NUMERO EN EL PLANO):", (40, y_ley + 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.60, (15, 15, 15), 2)
+
+    y_items = y_ley + 42
+    col_ancho = (lienzo_w - 80) // 3
+    for idx_item, item in enumerate(piezas_colocadas):
+        col_i = idx_item % 3
+        row_i = idx_item // 3
+        tx = 40 + col_i * col_ancho
+        ty = y_items + row_i * 26
+        texto_pieza = f"{item['N°']} {item['Pieza']}  [Giro: {item['Rotación']}]"
+        cv2.putText(hoja, texto_pieza, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (30, 30, 30), 1)
+
+    ok, buf = cv2.imencode(".png", hoja)
+    return buf.tobytes() if ok else None
+
+def generar_patron_fotografico_png(res_img_bgr, piezas_colocadas, info_lote):
+    """Genera la versión visual con la foto real del cuero de fondo."""
     h, w, _ = res_img_bgr.shape
-    margen_sup = 110
-    margen_inf = 90
-    margen_lat = 50
+    margen_sup = 100
+    margen_inf = 70
+    margen_lat = 40
 
     lienzo_h = h + margen_sup + margen_inf
     lienzo_w = w + (margen_lat * 2)
     hoja = np.ones((lienzo_h, lienzo_w, 3), dtype=np.uint8) * 255
 
-    cv2.putText(hoja, "LEATHER-FLEX 3D - PLANO DE CORTE DE PLANCHA COMPLETA", (margen_lat, 45),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.85, (44, 37, 32), 2)
-    cv2.putText(hoja, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Moldes: {len(piezas_colocadas)} | Defectos Evitados: {info_lote['defectos']} | Aprovechamiento: {info_lote['aprovechamiento_pct']}%",
-                (margen_lat, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.56, (100, 90, 80), 1)
-    cv2.line(hoja, (margen_lat, 95), (lienzo_w - margen_lat, 95), (140, 119, 99), 2)
+    cv2.putText(hoja, "LEATHER-FLEX 3D - VISTA FOTOGRAFICA DE CORTE", (margen_lat, 42),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.82, (44, 37, 32), 2)
+    cv2.putText(hoja, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')} | Moldes: {len(piezas_colocadas)} | Aprovechamiento: {info_lote['aprovechamiento_pct']}%",
+                (margen_lat, 74), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 80, 70), 1)
 
-    area_img = res_img_bgr.copy()
-    paso_grid = 50
-    for gx in range(0, w, paso_grid):
-        cv2.line(area_img, (gx, 0), (gx, h), (220, 220, 220), 1)
-    for gy in range(0, h, paso_grid):
-        cv2.line(area_img, (0, gy), (w, gy), (220, 220, 220), 1)
-
-    hoja[margen_sup:margen_sup + h, margen_lat:margen_lat + w] = area_img
+    hoja[margen_sup:margen_sup + h, margen_lat:margen_lat + w] = res_img_bgr
     cv2.rectangle(hoja, (margen_lat, margen_sup), (margen_lat + w, margen_sup + h), (0, 0, 0), 2)
-
-    for cx, cy in [(margen_lat, margen_sup), (margen_lat + w, margen_sup),
-                   (margen_lat, margen_sup + h), (margen_lat + w, margen_sup + h)]:
-        cv2.circle(hoja, (cx, cy), 10, (0, 0, 255), 2)
-
-    cv2.putText(hoja, "VERDE: Contorno de corte valido | ROJO: Defecto excluido | Cuadricula = 50 px",
-                (margen_lat, lienzo_h - 35), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (60, 60, 60), 1)
+    cv2.putText(hoja, "VERDE: Moldes validos | ROJO: Defectos evitados",
+                (margen_lat, lienzo_h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (60, 60, 60), 1)
 
     ok, buf = cv2.imencode(".png", hoja)
     return buf.tobytes() if ok else None
@@ -1209,10 +1344,10 @@ elif opcion_menu == "Detección de Defectos":
         else:
             st.info("Carga las fotos de la plancha en el panel izquierdo y presiona el botón para unirlas y detectar defectos.")
 
-# ================================================================== MÓDULO 3: ACOMODO DE MOLDES EN TODA LA PLANCHA
+# ================================================================== MÓDULO 3: ACOMODO DE MOLDES Y PLANO IMPRIMIBLE
 elif opcion_menu == "Acomodo de Moldes":
-    st.title("Acomodo de Moldes en Toda la Plancha")
-    st.caption("Junta todas las fotos en una sola plancha de cuero, identifica los defectos en rojo y distribuye los moldes abarcando TODA la superficie disponible.")
+    st.title("Acomodo de Moldes y Plan de Corte Imprimible")
+    st.caption("Acomoda los moldes en toda la plancha evitando defectos y descarga la Hoja Técnica Imprimible (fondo blanco, fácil lectura para el marroquinero).")
 
     col_a, col_b = st.columns([1, 1])
     with col_a:
@@ -1277,7 +1412,7 @@ elif opcion_menu == "Acomodo de Moldes":
 
     st.write("---")
     puede_procesar = (len(pieles_nest) > 0 or demo) and len(moldes_seleccionados) > 0
-    if st.button("Unir Plancha Completa, Detectar Defectos y Acomodar Moldes", type="primary", use_container_width=True, disabled=not puede_procesar):
+    if st.button("Calcular Mejor Acomodo y Generar Hoja Imprimible", type="primary", use_container_width=True, disabled=not puede_procesar):
         lista_a_procesar = list(pieles_nest)
         if demo and not lista_a_procesar:
             carpeta_demo = os.path.join(TMP, "demo")
@@ -1287,14 +1422,14 @@ elif opcion_menu == "Acomodo de Moldes":
             with open(p_demo, "rb") as fd:
                 lista_a_procesar = [("Muestra_Demo.jpg", fd.read())]
 
-        with st.spinner("Reconstruyendo plancha entera, detectando defectos y distribuyendo moldes en toda la superficie..."):
+        with st.spinner("Calculando mejor acomodo y dibujando Hoja Técnica Imprimible..."):
             bytes_plancha_entera, info_ensamble = ensamblar_plancha_completa(lista_a_procesar, columnas_cuadricula=cols_cuad_nest)
             _, obst, rep_def, err = detectar_defectos_cuero(bytes_plancha_entera, sensibilidad=sens_nest)
 
             if err:
                 st.session_state["resultado_nesting_plancha"] = {"error": err}
             else:
-                res_img_rgb, res_img_bgr, colocadas, no_cabieron, aprov_real = ubicar_moldes_en_toda_la_plancha(
+                res_img_rgb, datos_plano, colocadas, no_cabieron, aprov_real = ubicar_moldes_en_toda_la_plancha(
                     bytes_plancha_entera,
                     rep_def,
                     moldes_seleccionados,
@@ -1311,14 +1446,16 @@ elif opcion_menu == "Acomodo de Moldes":
                     "piezas": len(colocadas),
                     "aprovechamiento_pct": aprov_real
                 }
-                png_imprimible = generar_patron_imprimible(res_img_bgr, colocadas, info_lote)
+                hoja_tecnica_png = generar_hoja_tecnica_imprimible(datos_plano, colocadas, info_lote)
+                foto_plano_png = generar_patron_fotografico_png(datos_plano["res_img_bgr"], colocadas, info_lote)
                 st.session_state["resultado_nesting_plancha"] = {
                     "error": None,
                     "res_img": res_img_rgb,
                     "colocadas": colocadas,
                     "no_cabieron": no_cabieron,
                     "info": info_lote,
-                    "png_imprimible": png_imprimible
+                    "hoja_tecnica_png": hoja_tecnica_png,
+                    "foto_plano_png": foto_plano_png
                 }
 
     rn = st.session_state.get("resultado_nesting_plancha")
@@ -1328,7 +1465,7 @@ elif opcion_menu == "Acomodo de Moldes":
         else:
             info = rn["info"]
             st.caption(info["info_ensamble"])
-            st.success(f"Listo: **{info['piezas']} moldes ubicados** abarcando toda la plancha, ninguno sobre un defecto.")
+            st.success(f"Mejor opción calculada: **{info['piezas']} moldes ubicados** lejos de los defectos ({info['aprovechamiento_pct']}% de aprovechamiento).")
 
             m = st.columns(4)
             m[0].metric("Fotos Unidas", info["fotos_unidas"])
@@ -1339,29 +1476,48 @@ elif opcion_menu == "Acomodo de Moldes":
             if rn["no_cabieron"]:
                 st.warning(f"No hubo espacio libre suficiente para: {', '.join(rn['no_cabieron'])}. Reduce el tamaño relativo o el margen de seguridad.")
 
-            st.image(rn["res_img"], use_container_width=True, caption="Moldes ubicados lejos de los defectos abarcando toda la plancha")
+            # Vista comparativa: Hoja Imprimible de Taller (fondo blanco) y Vista sobre Foto Real
+            col_v1, col_v2 = st.columns([1.2, 1])
+            with col_v1:
+                st.subheader("Vista Previa: Hoja Técnica Imprimible (Papel)")
+                st.caption("Fondo blanco de alto contraste, piezas numeradas (#1, #2...), flecha de orientación y defectos tachados con X.")
+                if rn["hoja_tecnica_png"]:
+                    st.image(rn["hoja_tecnica_png"], use_container_width=True)
+            with col_v2:
+                st.subheader("Referencia sobre Plancha Real")
+                st.caption("Ubicación exacta de cada molde sobre la fotografía del cuero.")
+                st.image(rn["res_img"], use_container_width=True)
 
-            col_tbl, col_imp = st.columns([1.4, 1])
+            st.write("---")
+            col_tbl, col_imp = st.columns([1.3, 1])
             with col_tbl:
                 if rn["colocadas"]:
-                    st.write("**Detalle de Distribución en Plancha:**")
+                    st.write("**Guía Numerada para el Marroquinero:**")
                     st.dataframe(rn["colocadas"], use_container_width=True, hide_index=True)
             with col_imp:
-                st.write("**Exportar Plan de Corte:**")
-                if rn["png_imprimible"]:
+                st.write("**Descargar e Imprimir Plan de Corte:**")
+                if rn["hoja_tecnica_png"]:
                     st.download_button(
-                        label="Descargar Plan de Corte Imprimible (PNG)",
-                        data=rn["png_imprimible"],
-                        file_name="Plan_Corte_Plancha_Completa.png",
+                        label="Descargar Hoja Técnica Imprimible (Fondo Blanco - PNG)",
+                        data=rn["hoja_tecnica_png"],
+                        file_name="Hoja_Imprimible_Corte_Taller.png",
                         mime="image/png",
                         type="primary",
+                        use_container_width=True
+                    )
+                if rn["foto_plano_png"]:
+                    st.download_button(
+                        label="Descargar Vista Fotográfica (PNG)",
+                        data=rn["foto_plano_png"],
+                        file_name="Vista_Fotografica_Corte.png",
+                        mime="image/png",
                         use_container_width=True
                     )
                 pts_dxf_all = []
                 for m_sel in moldes_seleccionados:
                     pts_dxf_all.extend(obtener_puntos_molde(m_sel["nombre"], ruta_dxf=m_sel.get("dxf_path")).tolist())
                 st.download_button(
-                    label="Descargar Vector CAD (DXF)",
+                    label="Descargar Vector CAD / Plóter (DXF)",
                     data=generar_contenido_dxf(pts_dxf_all),
                     file_name="Plan_Corte_Plancha.dxf",
                     mime="application/dxf",
@@ -1373,7 +1529,6 @@ elif opcion_menu == "Catálogo de Moldes":
     st.title("Catálogo Digital de Moldes")
     st.caption("Sube fotos de tus moldes físicos para convertirlos automáticamente a formato vectorial DXF, o utiliza nuestros patrones de Calzado, Cartera y Casaca.")
 
-    # --- SECCIÓN 1: DIGITALIZADOR DE MOLDES DEL MARROQUINERO (FOTO -> DXF) ---
     with st.container(border=True):
         st.subheader("Subir y Convertir Molde del Marroquinero a Vector DXF")
         st.caption("Toma una foto de tu molde de cartón o papel sobre una mesa que contraste y la app extraerá su contorno vectorial DXF.")
@@ -1464,7 +1619,6 @@ elif opcion_menu == "Catálogo de Moldes":
 
     st.write("---")
 
-    # --- SECCIÓN 2: BIBLIOTECA DE MOLDES POR CATEGORÍA ---
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, nombre, cliente, dimensiones, archivo_dxf, origen FROM moldes ORDER BY id DESC")
