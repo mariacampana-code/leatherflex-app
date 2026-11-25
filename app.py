@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Escáner y Acomodo Inteligente de Moldes para Cuero (Móvil + PC, Modo Claro/Oscuro)"""
+"""Leather-Flex 3D - Escáner y Acomodo Inteligente de Moldes para Cuero"""
 import os
 import math
 import sqlite3
@@ -251,67 +251,82 @@ def ensamblar_plancha_completa(lista_imagenes_bytes):
     ok, buf = cv2.imencode(".jpg", plancha, [int(cv2.IMWRITE_JPEG_QUALITY), 94])
     return buf.tobytes(), f"Uniendo las {n} fotos del cuero completado"
 
-# ------------------------------------------------------------------ CSS Blindado (Modo Claro y Modo Oscuro en Celular/PC)
+# ------------------------------------------------------------------ CSS Estética Original + Contraste Blindado en Celulares (Claro/Oscuro)
 st.markdown("""
 <style>
     :root {
         color-scheme: light !important;
     }
-    html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-        background: #f4efe8 !important;
-        color: #1c1917 !important;
+    html, body, .stApp, [data-testid="stAppViewContainer"] {
+        background: linear-gradient(135deg, #f6f3ee 0%, #e5dcd0 100%) !important;
+        color: #1f2421 !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     }
     [data-testid="stHeader"] {
-        background: rgba(244, 239, 232, 0.92) !important;
+        background: rgba(246, 243, 238, 0.88) !important;
+        backdrop-filter: blur(6px);
     }
     [data-testid="stHeader"] button, [data-testid="stHeader"] svg {
-        color: #16382b !important;
-        fill: #16382b !important;
+        color: #1f2421 !important;
+        fill: #1f2421 !important;
     }
 
-    /* Forzar contraste legible en TODOS los textos, labels, métricas e inputs sin importar Dark Mode */
+    /* Textos generales sobre fondo crema: siempre oscuros y legibles incluso en celulares con Dark Mode */
     .stApp h1, .stApp h2, .stApp h3, .stApp h4,
-    .stApp p, .stApp span, .stApp label, .stApp small,
     [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] li,
+    [data-testid="stMarkdownContainer"] strong,
     [data-testid="stWidgetLabel"] p,
     [data-testid="stWidgetLabel"] label,
     [data-testid="stCaptionContainer"] p,
     [data-testid="stMetricLabel"] p,
+    [data-testid="stMetricLabel"] label,
     [data-testid="stMetricLabel"] div,
-    [data-testid="stMetricValue"] div {
-        color: #1c1917 !important;
+    [data-testid="stMetricValue"] div,
+    div[data-baseweb="radio"] label p,
+    div[data-baseweb="checkbox"] label p {
+        color: #1f2421 !important;
     }
 
-    /* Inputs de texto y selectores */
+    /* Bordes de contenedores limpios */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        border-color: rgba(31, 36, 33, 0.22) !important;
+        border-radius: 16px !important;
+    }
+
+    /* Inputs con estilo oscuro elegante y texto blanco nítido */
     .stTextInput input, .stNumberInput input, div[data-baseweb="select"] > div {
-        background-color: #ffffff !important;
-        color: #1c1917 !important;
-        border: 1.5px solid #c7bdb0 !important;
+        background-color: #2c2925 !important;
+        color: #f8fafc !important;
+        border: 1px solid #44403c !important;
         border-radius: 10px !important;
     }
     .stTextInput input::placeholder {
-        color: #78716c !important;
+        color: #d6d3d1 !important;
         opacity: 1 !important;
     }
+    div[data-baseweb="select"] span, div[data-baseweb="select"] svg {
+        color: #f8fafc !important;
+        fill: #f8fafc !important;
+    }
 
-    /* Caja File Uploader (Upload) legible en celular oscuro y claro */
+    /* Zona de subida (File Uploader) oscura original con botón Upload bien legible */
     [data-testid="stFileUploader"] section,
     [data-testid="stFileUploaderDropzone"] {
-        background-color: #ffffff !important;
-        border: 1.5px dashed #8c7d6b !important;
+        background-color: #2c2925 !important;
+        border: 1px solid #44403c !important;
         border-radius: 12px !important;
-        color: #1c1917 !important;
+        color: #f8fafc !important;
     }
     [data-testid="stFileUploaderDropzone"] span,
     [data-testid="stFileUploaderDropzone"] small,
     [data-testid="stFileUploaderDropzone"] div {
-        color: #292524 !important;
+        color: #e7e5e4 !important;
     }
     [data-testid="stFileUploaderDropzone"] button {
-        background-color: #16382b !important;
+        background-color: #3f3b36 !important;
         color: #ffffff !important;
-        border: none !important;
+        border: 1px solid #78716c !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
     }
@@ -320,36 +335,20 @@ st.markdown("""
         color: #ffffff !important;
         fill: #ffffff !important;
     }
-
-    /* Botones principales y secundarios */
-    button[kind="primary"], [data-testid="stBaseButton-primary"] {
-        background-color: #e67e22 !important;
-        color: #ffffff !important;
-        border: none !important;
-        border-radius: 12px !important;
-        font-weight: 700 !important;
+    [data-testid="stFileUploaderFile"] {
+        background-color: rgba(255, 255, 255, 0.75) !important;
+        border-radius: 8px !important;
+        padding: 4px 8px !important;
     }
-    button[kind="primary"] p, [data-testid="stBaseButton-primary"] p {
-        color: #ffffff !important;
-    }
-    button[kind="secondary"], [data-testid="stBaseButton-secondary"] {
-        background-color: #ffffff !important;
-        color: #16382b !important;
-        border: 1.5px solid #16382b !important;
-        border-radius: 10px !important;
-        font-weight: 600 !important;
-    }
-    button[kind="secondary"] p, [data-testid="stBaseButton-secondary"] p {
-        color: #16382b !important;
+    [data-testid="stFileUploaderFile"] span,
+    [data-testid="stFileUploaderFile"] small {
+        color: #1f2421 !important;
     }
 
-    /* Barra lateral (PC y desplegable en celular) */
+    /* Barra lateral verde bosque */
     section[data-testid="stSidebar"] {
         background-color: #16382b !important;
         border-right: 1px solid #0f291f !important;
-    }
-    section[data-testid="stSidebar"] * {
-        color: #f8fafc !important;
     }
     div[data-testid="stSidebarHeader"] { display: none; }
     #MainMenu { visibility: hidden; }
@@ -357,7 +356,7 @@ st.markdown("""
 
     .brand-container {
         padding: 1.1rem 0.5rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.15);
         margin-bottom: 1rem;
     }
     .brand-title {
@@ -368,67 +367,145 @@ st.markdown("""
     }
     .brand-sub {
         font-size: 0.78rem;
-        color: #f59e0b !important;
+        color: #f39c12 !important;
         font-weight: 600;
     }
     section[data-testid="stSidebar"] div[data-testid="stRadio"] > label { display: none; }
     section[data-testid="stSidebar"] div[data-testid="stRadio"] > div { gap: 8px; }
     section[data-testid="stSidebar"] div[data-testid="stRadio"] label {
-        background: rgba(255, 255, 255, 0.10) !important;
-        border: 1px solid rgba(255, 255, 255, 0.22) !important;
+        background: rgba(255, 255, 255, 0.08) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
         border-radius: 10px !important;
         padding: 12px 16px !important;
-        color: #ffffff !important;
+        color: #f2f4f3 !important;
         font-weight: 600 !important;
         font-size: 0.95rem !important;
+        transition: all 0.2s ease !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label p {
+        color: #f2f4f3 !important;
     }
     section[data-testid="stSidebar"] div[data-testid="stRadio"] label[data-checked="true"] {
         background: #e67e22 !important;
         color: #ffffff !important;
         border-color: #d35400 !important;
+        box-shadow: 0 4px 12px rgba(230, 126, 34, 0.4) !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stRadio"] label[data-checked="true"] p {
+        color: #ffffff !important;
     }
     section[data-testid="stSidebar"] div[data-testid="stRadio"] input[type="radio"] { display: none !important; }
 
-    /* Tarjetas de métricas */
-    [data-testid="stMetric"] {
-        background-color: #ffffff !important;
-        border: 1px solid #dcd3c7 !important;
-        border-radius: 12px !important;
-        padding: 10px 14px !important;
+    /* Barra superior horizontal tipo píldora (igual a la estética original, siempre en 1 fila en móvil) */
+    .step-bar {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 6px;
+        margin-bottom: 16px;
+        background: #ffffff;
+        padding: 8px 10px;
+        border-radius: 14px;
+        border: 1px solid #dfd6ca;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.04);
+    }
+    .step-pill {
+        flex: 1;
+        text-align: center;
+        padding: 8px 4px;
+        border-radius: 9px;
+        font-weight: 700;
+        font-size: 0.80rem;
+        white-space: nowrap;
+        text-decoration: none !important;
+        display: block;
+    }
+    .step-active {
+        background: #e67e22 !important;
+        color: #ffffff !important;
+    }
+    .step-done {
+        background: #dff3e8 !important;
+        color: #16382b !important;
+        border: 1px solid #9cd4b5;
+    }
+    .step-pending {
+        background: #f4f1ec !important;
+        color: #5c5349 !important;
     }
 
-    /* Barra superior móvil/desktop sincronizada con el menú lateral */
-    .mobile-brand-header {
-        background: #16382b;
+    /* Botones de acción */
+    button[kind="primary"], [data-testid="stBaseButton-primary"] {
+        background-color: #e67e22 !important;
         color: #ffffff !important;
-        padding: 12px 16px;
-        border-radius: 14px;
-        margin-bottom: 10px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
+        border: none !important;
+        border-radius: 10px !important;
+        font-weight: 700 !important;
     }
-    .mobile-brand-header span {
+    button[kind="primary"] p, [data-testid="stBaseButton-primary"] p {
         color: #ffffff !important;
-        font-weight: 800;
-        font-size: 1.05rem;
     }
-    .mobile-brand-header small {
-        color: #f59e0b !important;
-        font-weight: 600;
-        font-size: 0.78rem;
+    button[kind="secondary"], [data-testid="stBaseButton-secondary"] {
+        background-color: rgba(255, 255, 255, 0.85) !important;
+        color: #1f2421 !important;
+        border: 1px solid #c7bdb0 !important;
+        border-radius: 10px !important;
+        font-weight: 600 !important;
+    }
+    button[kind="secondary"] p, [data-testid="stBaseButton-secondary"] p {
+        color: #1f2421 !important;
     }
 
     .feed-card {
-        background: #ffffff !important;
+        background: rgba(255, 255, 255, 0.92) !important;
         border-radius: 14px;
         padding: 14px;
         margin-bottom: 10px;
-        border: 1px solid #dcd3c7;
-        color: #1c1917 !important;
+        border: 1px solid #e2d9ce;
+        color: #1f2421 !important;
+    }
+    .feed-card small, .feed-card b {
+        color: #1f2421 !important;
     }
 </style>
 """, unsafe_allow_html=True)
+
+PAGINAS = [
+    "Captura del Cuero",
+    "Detección de Defectos",
+    "Acomodo de Moldes",
+    "Catálogo de Moldes"
+]
+
+# Sincronización opcional por parámetro de URL (?p=0..3) para que la barra de píldoras sea clickeable en móvil sin alterar el diseño
+qp = st.query_params.get("p")
+if qp is not None and str(qp) in ("0", "1", "2", "3"):
+    idx_qp = int(str(qp))
+    if st.session_state.get("ultimo_qp") != str(qp):
+        st.session_state["pagina_activa"] = PAGINAS[idx_qp]
+        st.session_state["nav_sidebar"] = PAGINAS[idx_qp]
+        st.session_state["ultimo_qp"] = str(qp)
+
+if "pagina_activa" not in st.session_state:
+    st.session_state["pagina_activa"] = PAGINAS[0]
+
+def cambiar_desde_sidebar():
+    st.session_state["pagina_activa"] = st.session_state["nav_sidebar"]
+    st.query_params["p"] = str(PAGINAS.index(st.session_state["pagina_activa"]))
+
+def render_barra_pasos(paso_actual):
+    p1 = "step-active" if paso_actual == 1 else "step-done"
+    p2 = "step-active" if paso_actual == 2 else ("step-done" if paso_actual > 2 else "step-pending")
+    p3 = "step-active" if paso_actual == 3 else ("step-done" if paso_actual > 3 else "step-pending")
+    p4 = "step-active" if paso_actual == 4 else "step-pending"
+    st.markdown(f"""
+        <div class="step-bar">
+            <a href="?p=0" target="_self" class="step-pill {p1}">1. Fotos</a>
+            <a href="?p=1" target="_self" class="step-pill {p2}">2. Defectos</a>
+            <a href="?p=2" target="_self" class="step-pill {p3}">3. Moldes</a>
+            <a href="?p=3" target="_self" class="step-pill {p4}">4. Catálogo</a>
+        </div>
+    """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------------ Geometría Curva de Moldes
 def suavizar_contorno(puntos, num_puntos=100):
@@ -1180,24 +1257,7 @@ def guardar_captura_en_bd(nombre_archivo, bytes_data, nota):
     st.session_state["ultima_captura_cuero"] = ruta_guardada
     return ruta_guardada
 
-# ------------------------------------------------------------------ Navegación Sincronizada (Móvil + Barra Lateral PC)
-PAGINAS = [
-    "Captura del Cuero",
-    "Detección de Defectos",
-    "Acomodo de Moldes",
-    "Catálogo de Moldes"
-]
-
-if "pagina_activa" not in st.session_state:
-    st.session_state["pagina_activa"] = PAGINAS[0]
-
-def cambiar_desde_sidebar():
-    st.session_state["pagina_activa"] = st.session_state["nav_sidebar"]
-
-def cambiar_desde_top(pag):
-    st.session_state["pagina_activa"] = pag
-    st.session_state["nav_sidebar"] = pag
-
+# ------------------------------------------------------------------ Barra Lateral (4 Pasos en Orden)
 with st.sidebar:
     st.markdown("""
         <div class="brand-container">
@@ -1215,37 +1275,11 @@ with st.sidebar:
         label_visibility="collapsed"
     )
 
-# Encabezado y barra superior rápida (siempre visible en celular sin necesidad de abrir el menú lateral)
-st.markdown("""
-    <div class="mobile-brand-header">
-        <span>LEATHER-FLEX 3D</span>
-        <small>Escáner y acomodo de moldes</small>
-    </div>
-""", unsafe_allow_html=True)
-
-cols_top = st.columns(4)
-etiquetas_top = [
-    ("1. Captura", PAGINAS[0]),
-    ("2. Defectos", PAGINAS[1]),
-    ("3. Acomodo", PAGINAS[2]),
-    ("4. Catálogo", PAGINAS[3])
-]
-for idx_t, (etiq_t, pag_t) in enumerate(etiquetas_top):
-    es_activa = (st.session_state["pagina_activa"] == pag_t)
-    with cols_top[idx_t]:
-        st.button(
-            etiq_t,
-            key=f"top_btn_{idx_t}",
-            type="primary" if es_activa else "secondary",
-            use_container_width=True,
-            on_click=cambiar_desde_top,
-            args=(pag_t,)
-        )
-
 opcion_menu = st.session_state["pagina_activa"]
 
 # ================================================================== PASO 1: CAPTURA DEL CUERO
 if opcion_menu == "Captura del Cuero":
+    render_barra_pasos(1)
     st.title("1. Captura del Cuero")
     st.caption("Sube las fotos tomadas al deslizar el escáner sobre la plancha de cuero.")
 
@@ -1373,6 +1407,7 @@ if opcion_menu == "Captura del Cuero":
 
 # ================================================================== PASO 2: DETECCIÓN DE DEFECTOS
 elif opcion_menu == "Detección de Defectos":
+    render_barra_pasos(2)
     st.title("2. Detección de Defectos")
     st.caption("Detecta automáticamente rayones, manchas y huecos en la plancha capturada.")
 
@@ -1425,7 +1460,7 @@ elif opcion_menu == "Detección de Defectos":
             if res_plancha["error"]:
                 st.error(res_plancha["error"])
             else:
-                st.success(f"**{len(res_plancha['reporte'])} defectos encontrados.** Ya puedes ir a '3. Acomodo'.")
+                st.success(f"**{len(res_plancha['reporte'])} defectos encontrados.** Ya puedes ir a '3. Moldes'.")
                 st.image(res_plancha["img_viz"], use_container_width=True)
                 if res_plancha["reporte"]:
                     st.dataframe(
@@ -1442,6 +1477,7 @@ elif opcion_menu == "Detección de Defectos":
 
 # ================================================================== PASO 3: ACOMODO DE MOLDES Y PLAN DE CORTE IMPRIMIBLE
 elif opcion_menu == "Acomodo de Moldes":
+    render_barra_pasos(3)
     st.title("3. Acomodo de Moldes y Plan de Corte Imprimible")
     st.caption("Ubica los moldes lejos de los defectos y descarga la hoja lista para imprimir en el taller.")
 
@@ -1619,6 +1655,7 @@ elif opcion_menu == "Acomodo de Moldes":
 
 # ================================================================== PASO 4: CATÁLOGO DE MOLDES + FOTO -> DXF
 elif opcion_menu == "Catálogo de Moldes":
+    render_barra_pasos(4)
     st.title("4. Catálogo Digital de Moldes")
     st.caption("Sube fotos de tus moldes físicos para convertirlos a DXF, o usa nuestros moldes de Calzado, Cartera y Casaca.")
 
@@ -1742,7 +1779,7 @@ elif opcion_menu == "Catálogo de Moldes":
                     lienzo_m = np.ones((360, 320, 3), dtype=np.uint8) * 255
                     for gx in range(0, 320, 40):
                         cv2.line(lienzo_m, (gx, 0), (gx, 360), (235, 235, 235), 1)
-                    for gy in range(0, 360, 40):
+                    for gy in range(0, 320, 40):
                         cv2.line(lienzo_m, (0, gy), (320, gy), (235, 235, 235), 1)
 
                     min_xy = np.min(pts_molde, axis=0)
