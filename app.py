@@ -1,4 +1,4 @@
-"""Leather-Flex 3D - Motor de IA Embebido (Random Forest + Analisis Multi-Canal LAB), Lotes y Plano Imprimible"""
+"""Leather-Flex 3D - Motor de IA Embebido (Random Forest + Analisis Multi-Canal LAB + Video Keyframes), Lotes y Plano Imprimible"""
 import os
 import json
 import sqlite3
@@ -28,6 +28,8 @@ st.set_page_config(
 
 TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
+
+EXTENSIONES_VIDEO = (".mp4", ".mov", ".avi", ".mkv", ".webm")
 
 # ------------------------------------------------------------------ Motor de IA Embebido (Aprendizaje Automático)
 CLASES_DEFECTOS = [
@@ -96,6 +98,94 @@ def predecir_defecto_ia(vector_caracteristicas):
         probs = np.array(scores) / (np.sum(scores) + 1e-8)
         clase_id = int(np.argmax(probs))
         return clase_id, CLASES_DEFECTOS[clase_id], round(float(probs[clase_id] * 100.0), 1)
+
+# ------------------------------------------------------------------ Extractor Inteligente de Fotogramas de Video
+def extraer_fotogramas_nitidos_video(bytes_video, nombre_video="video.mp4", max_fotogramas=6):
+    """
+    Extrae los fotogramas más nítidos de un video descartando los cuadros borrosos
+    por movimiento rápido (usando varianza de Laplaciano) y evitando duplicados si
+    la cámara se movió lento.
+    """
+    ext = os.path.splitext(nombre_video)[1] or ".mp4"
+    tmp_vid = os.path.join(TMP, f"vid_proc_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{ext}")
+    with open(tmp_vid, "wb") as f:
+        f.write(bytes_video)
+
+    cap = cv2.VideoCapture(tmp_vid)
+    if not cap.isOpened():
+        return []
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    if total_frames <= 0:
+        total_frames = 300
+
+    # Evaluar hasta 45 puntos candidatos distribuidos en el video
+    paso = max(1, total_frames // 45)
+    candidatos = []
+
+    frame_idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_idx % paso == 0:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # Medida de nitidez (mayor valor = menos desenfoque por movimiento)
+            nitidez = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            hist = cv2.calcHist([gray], [0], None, [32], [0, 256])
+            cv2.normalize(hist, hist)
+            tiempo_seg = round(frame_idx / fps, 1)
+            candidatos.append({
+                "frame": frame,
+                "nitidez": nitidez,
+                "hist": hist,
+                "tiempo": tiempo_seg
+            })
+        frame_idx += 1
+
+    cap.release()
+    try:
+        os.remove(tmp_vid)
+    except Exception:
+        pass
+
+    if not candidatos:
+        return []
+
+    # Dividir el video en segmentos temporales y elegir el fotograma MÁS NÍTIDO de cada segmento
+    num_segmentos = min(max_fotogramas, len(candidatos))
+    segmentos = np.array_split(candidatos, num_segmentos)
+    seleccionados = []
+    ultimo_hist = None
+
+    for seg in segmentos:
+        if len(seg) == 0:
+            continue
+        mejor = max(seg, key=lambda item: item["nitidez"])
+        # Evitar fotogramas prácticamente idénticos si la cámara estuvo detenida
+        if ultimo_hist is not None:
+            similitud = cv2.compareHist(ultimo_hist, mejor["hist"], cv2.HISTCMP_CORREL)
+            if similitud > 0.992 and len(seleccionados) > 0:
+                continue
+        ultimo_hist = mejor["hist"]
+        ok, buf = cv2.imencode(".jpg", mejor["frame"], [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        if ok:
+            etiqueta = f"{os.path.splitext(nombre_video)[0]} (Seg {mejor['tiempo']}s)"
+            seleccionados.append((etiqueta, buf.tobytes()))
+
+    return seleccionados
+
+def expandir_archivos_a_imagenes(lista_archivos):
+    """Convierte una mezcla de fotos y videos en una lista unificada de imágenes nítidas listas para la IA."""
+    imagenes_listas = []
+    for nom, b_data in lista_archivos:
+        if nom.lower().endswith(EXTENSIONES_VIDEO):
+            frames_vid = extraer_fotogramas_nitidos_video(b_data, nombre_video=nom, max_fotogramas=6)
+            imagenes_listas.extend(frames_vid)
+        else:
+            imagenes_listas.append((nom, b_data))
+    return imagenes_listas
 
 # ------------------------------------------------------------------ CSS Personalizado
 st.markdown("""
@@ -649,12 +739,11 @@ if opcion_menu == "Captura del Cuero":
 
         archivos_nuevos = st.file_uploader(
             "Seleccionar de la biblioteca, tomar foto o grabar video (puedes elegir varios a la vez)",
-            type=["jpg", "png", "jpeg", "webp", "mp4", "mov", "avi"],
+            type=["jpg", "png", "jpeg", "webp", "mp4", "mov", "avi", "mkv"],
             accept_multiple_files=True,
             key=f"uploader_unico_{st.session_state['uploader_key']}"
         )
 
-        # Si el usuario selecciona o toma archivos, se agregan automáticamente a la bandeja acumulativa
         if archivos_nuevos:
             for arch in archivos_nuevos:
                 st.session_state["bandeja_capturas"].append((arch.name, arch.getvalue()))
@@ -665,11 +754,11 @@ if opcion_menu == "Captura del Cuero":
 
         if bandeja:
             st.write("---")
-            st.markdown(f"**Archivos cargados ({len(bandeja)}):** Puedes seguir tocando el botón de arriba para tomar o subir más fotos.")
+            st.markdown(f"**Archivos cargados ({len(bandeja)}):** Puedes seguir tocando el botón de arriba para tomar o subir más fotos o videos.")
             cols_prev = st.columns(4)
             for idx_p, (nom_p, bytes_p) in enumerate(bandeja):
                 with cols_prev[idx_p % 4]:
-                    if nom_p.lower().endswith((".mp4", ".mov", ".avi")):
+                    if nom_p.lower().endswith(EXTENSIONES_VIDEO):
                         st.video(bytes_p)
                         st.caption(nom_p)
                     else:
@@ -679,13 +768,13 @@ if opcion_menu == "Captura del Cuero":
             with col_g1:
                 if st.button(f"Guardar {len(bandeja)} Archivo(s) y Preparar Análisis", type="primary", use_container_width=True):
                     rutas_lote = []
-                    imagenes_memoria = []
                     for idx, (nom_item, bytes_item) in enumerate(bandeja):
                         etiqueta = f"{nota_lote} #{idx+1}" if nota_lote else f"Captura #{idx+1} ({nom_item})"
                         ruta_g = guardar_captura_en_bd(nom_item, bytes_item, etiqueta)
-                        if not nom_item.lower().endswith((".mp4", ".mov", ".avi")):
-                            rutas_lote.append(ruta_g)
-                            imagenes_memoria.append((nom_item, bytes_item))
+                        rutas_lote.append(ruta_g)
+
+                    with st.spinner("Extrayendo fotogramas nítidos para análisis IA..."):
+                        imagenes_memoria = expandir_archivos_a_imagenes(bandeja)
 
                     if imagenes_memoria:
                         st.session_state["lote_pieles_activas"] = rutas_lote
@@ -694,7 +783,7 @@ if opcion_menu == "Captura del Cuero":
 
                     st.session_state["bandeja_capturas"] = []
                     st.session_state["uploader_key"] += 1
-                    st.success(f"{len(bandeja)} archivo(s) guardados correctamente.")
+                    st.success(f"{len(bandeja)} archivo(s) guardados y preparados para detección.")
                     st.rerun()
 
             with col_g2:
@@ -720,21 +809,22 @@ if opcion_menu == "Captura del Cuero":
             with cols_hist[idx % 3]:
                 st.markdown(f"<div class='feed-card'><small>{fecha}</small><br><b>{tit}</b></div>", unsafe_allow_html=True)
                 if media and os.path.exists(media):
-                    if media.lower().endswith((".mp4", ".mov", ".avi")):
+                    if media.lower().endswith(EXTENSIONES_VIDEO):
                         st.video(media)
                     else:
                         st.image(media, use_container_width=True)
                 c1, c2 = st.columns(2)
                 with c1:
-                    if media and os.path.exists(media) and not media.lower().endswith((".mp4", ".mov", ".avi")):
+                    if media and os.path.exists(media):
                         if st.button("Seleccionar", key=f"sel_{post_id}", use_container_width=True):
                             st.session_state["ultima_captura_cuero"] = media
                             st.session_state["lote_pieles_activas"] = [media]
                             with open(media, "rb") as f_sel:
                                 b_sel = f_sel.read()
-                            st.session_state["imagenes_def_memoria"] = [(os.path.basename(media), b_sel)]
-                            st.session_state["pieles_nesting_memoria"] = [(os.path.basename(media), b_sel)]
-                            st.toast(f"'{tit}' seleccionada.")
+                            imgs_sel = expandir_archivos_a_imagenes([(os.path.basename(media), b_sel)])
+                            st.session_state["imagenes_def_memoria"] = imgs_sel
+                            st.session_state["pieles_nesting_memoria"] = imgs_sel
+                            st.toast(f"'{tit}' cargado para análisis IA.")
                 with c2:
                     if st.button("Eliminar", key=f"del_{post_id}", use_container_width=True):
                         conn = sqlite3.connect(DB_PATH)
@@ -752,30 +842,32 @@ if opcion_menu == "Captura del Cuero":
 # ================================================================== MÓDULO 2: DETECCIÓN DE DEFECTOS
 elif opcion_menu == "Detección de Defectos":
     st.title("Detección de Defectos en Rojo")
-    st.caption("Motor de visión artificial con clasificador de IA integrado para detección y diagnóstico de fallas.")
+    st.caption("Motor de visión artificial con clasificador de IA integrado para fotos y videos (con filtro anti-movimiento).")
 
     col1, col2 = st.columns([1, 1.3])
     with col1:
-        st.subheader("1. Cargar Imágenes de Cuero")
-        fotos_subidas = st.file_uploader(
-            "Sube una o muchas fotos de pieles para detectar defectos",
-            type=["jpg", "jpeg", "png", "webp"],
+        st.subheader("1. Cargar Imágenes o Videos de Cuero")
+        archivos_subidos = st.file_uploader(
+            "Sube fotos o videos de pieles para detectar defectos",
+            type=["jpg", "jpeg", "png", "webp", "mp4", "mov", "avi", "mkv"],
             accept_multiple_files=True,
             key="uploader_defectos_lote"
         )
 
-        if fotos_subidas:
-            st.session_state["imagenes_def_memoria"] = [(f.name, f.getvalue()) for f in fotos_subidas]
+        if archivos_subidos:
+            with st.spinner("Extrayendo fotogramas nítidos..."):
+                raw_files = [(f.name, f.getvalue()) for f in archivos_subidos]
+                st.session_state["imagenes_def_memoria"] = expandir_archivos_a_imagenes(raw_files)
         elif "imagenes_def_memoria" not in st.session_state and st.session_state.get("ultima_captura_cuero"):
             ruta_act = st.session_state["ultima_captura_cuero"]
             if os.path.exists(ruta_act):
                 with open(ruta_act, "rb") as f:
-                    st.session_state["imagenes_def_memoria"] = [(os.path.basename(ruta_act), f.read())]
+                    st.session_state["imagenes_def_memoria"] = expandir_archivos_a_imagenes([(os.path.basename(ruta_act), f.read())])
 
         imagenes_actuales = st.session_state.get("imagenes_def_memoria", [])
         if imagenes_actuales:
-            st.info(f"Listas para analizar: **{len(imagenes_actuales)} imagen(es)**")
-            if st.button("Limpiar imágenes cargadas"):
+            st.info(f"Listas para analizar: **{len(imagenes_actuales)} vista(s) / fotograma(s) nítidos**")
+            if st.button("Limpiar archivos cargados"):
                 st.session_state["imagenes_def_memoria"] = []
                 st.session_state["resultados_defectos_lote"] = []
                 st.rerun()
@@ -786,7 +878,7 @@ elif opcion_menu == "Detección de Defectos":
         )
 
         btn_analizar = st.button(
-            f"Detectar Defectos en {len(imagenes_actuales)} Imagen(es)",
+            f"Detectar Defectos en {len(imagenes_actuales)} Vista(s)",
             type="primary",
             use_container_width=True,
             disabled=(len(imagenes_actuales) == 0)
@@ -815,7 +907,7 @@ elif opcion_menu == "Detección de Defectos":
         res_lote = st.session_state.get("resultados_defectos_lote", [])
         if res_lote:
             for item in res_lote:
-                st.markdown(f"### Archivo: `{item['nombre']}`")
+                st.markdown(f"### Vista: `{item['nombre']}`")
                 if item["error"]:
                     st.error(item["error"])
                 else:
@@ -838,7 +930,7 @@ elif opcion_menu == "Detección de Defectos":
                         )
                 st.divider()
         else:
-            st.info("Sube una o varias fotos en el panel izquierdo y presiona el botón para iniciar.")
+            st.info("Sube fotos o videos en el panel izquierdo y presiona el botón para iniciar.")
 
 # ================================================================== MÓDULO 3: ACOMODO DE MOLDES Y PATRÓN IMPRIMIBLE
 elif opcion_menu == "Acomodo de Moldes":
@@ -849,19 +941,20 @@ elif opcion_menu == "Acomodo de Moldes":
     with col_a:
         st.subheader("1. Pieles para Distribución")
         fotos_nest = st.file_uploader(
-            "Sube una o muchas fotos de pieles para acomodar moldes",
-            type=["jpg", "jpeg", "png", "webp"],
+            "Sube fotos o videos de pieles para acomodar moldes",
+            type=["jpg", "jpeg", "png", "webp", "mp4", "mov", "avi", "mkv"],
             accept_multiple_files=True,
             key="uploader_nesting_multi"
         )
         if fotos_nest:
-            st.session_state["pieles_nesting_memoria"] = [(f.name, f.getvalue()) for f in fotos_nest]
+            with st.spinner("Extrayendo vistas nítidas..."):
+                st.session_state["pieles_nesting_memoria"] = expandir_archivos_a_imagenes([(f.name, f.getvalue()) for f in fotos_nest])
         elif "pieles_nesting_memoria" not in st.session_state and st.session_state.get("imagenes_def_memoria"):
             st.session_state["pieles_nesting_memoria"] = st.session_state["imagenes_def_memoria"]
 
         pieles_nest = st.session_state.get("pieles_nesting_memoria", [])
         if pieles_nest:
-            st.success(f"{len(pieles_nest)} piel(es) listas para distribución automática.")
+            st.success(f"{len(pieles_nest)} vista(s) de piel listas para distribución automática.")
         demo = st.button("Usar Muestra de Prueba (Demo)")
 
     with col_b:
