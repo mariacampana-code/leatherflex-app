@@ -29,6 +29,33 @@ TMP = st.session_state.setdefault("tmp", tempfile.mkdtemp(prefix="leatherflex_")
 DB_PATH = os.path.join(os.path.dirname(__file__), "leatherflex.db")
 EXTENSIONES_VIDEO = (".mp4", ".mov", ".avi", ".mkv", ".webm")
 
+# ------------------------------------------------------------------ Avisos con los colores exactos de la barra (100% legibles)
+def mostrar_aviso(texto, tipo="info"):
+    estilos = {
+        "info": ("#16382b", "#ffffff", "#e67e22"),     # Verde bosque barra lateral + texto blanco + borde naranja
+        "success": ("#dff3e8", "#16382b", "#2e7d32"),  # Verde claro barra superior + texto verde oscuro
+        "error": ("#fee2e2", "#7f1d1d", "#dc2626"),    # Rojo suave + texto rojo oscuro
+    }
+    bg, fg, borde = estilos.get(tipo, estilos["info"])
+    st.markdown(
+        f"""
+        <div style="
+            background-color: {bg};
+            color: {fg};
+            border-left: 5px solid {borde};
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin: 8px 0 12px 0;
+            font-size: 0.95rem;
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        ">
+            <span style="color: {fg} !important;">{texto}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 # ------------------------------------------------------------------ Motor de IA Embebido (Luz Rasante 45°)
 CLASES_DEFECTOS = [
     "Veta Natural (Sano)",
@@ -258,7 +285,7 @@ def ensamblar_plancha_completa(lista_imagenes_bytes):
     ok, buf = cv2.imencode(".jpg", plancha, [int(cv2.IMWRITE_JPEG_QUALITY), 94])
     return buf.tobytes(), f"Uniendo las {n} fotos del cuero completado"
 
-# ------------------------------------------------------------------ CSS Estética Original + Contraste Blindado en Celulares (Claro/Oscuro)
+# ------------------------------------------------------------------ CSS Estética Original + Contraste Blindado en Celulares
 st.markdown("""
 <style>
     :root {
@@ -278,7 +305,7 @@ st.markdown("""
         fill: #1f2421 !important;
     }
 
-    /* Textos generales sobre fondo crema (excluyendo los cuadros de notificación/alerta) */
+    /* Textos generales sobre fondo crema */
     .stApp h1, .stApp h2, .stApp h3, .stApp h4,
     [data-testid="stWidgetLabel"] p,
     [data-testid="stWidgetLabel"] label,
@@ -290,33 +317,6 @@ st.markdown("""
     div[data-baseweb="radio"] label p,
     div[data-baseweb="checkbox"] label p {
         color: #1f2421 !important;
-    }
-    div:not([role="alert"]):not([data-testid="stNotification"]):not([data-testid="stAlert"]) > [data-testid="stMarkdownContainer"] p,
-    div:not([role="alert"]):not([data-testid="stNotification"]):not([data-testid="stAlert"]) > [data-testid="stMarkdownContainer"] li,
-    div:not([role="alert"]):not([data-testid="stNotification"]):not([data-testid="stAlert"]) > [data-testid="stMarkdownContainer"] strong {
-        color: #1f2421 !important;
-    }
-
-    /* CUADROS DE NOTIFICACIÓN / ALERTA (st.info, st.success, st.warning, st.error): fondo azul oscuro y letras BLANCAS */
-    [data-testid="stNotification"],
-    [data-testid="stAlert"],
-    div[role="alert"] {
-        background-color: #172554 !important;
-        border: 1px solid #1e3a8a !important;
-        border-left: 5px solid #3b82f6 !important;
-        border-radius: 12px !important;
-        color: #ffffff !important;
-    }
-    [data-testid="stNotification"] *,
-    [data-testid="stAlert"] *,
-    div[role="alert"] * {
-        color: #ffffff !important;
-    }
-    [data-testid="stNotification"] svg,
-    [data-testid="stAlert"] svg,
-    div[role="alert"] svg {
-        fill: #93c5fd !important;
-        color: #93c5fd !important;
     }
 
     /* Bordes de contenedores limpios */
@@ -1403,7 +1403,6 @@ if opcion_menu == "Captura del Cuero":
 
                     st.session_state["bandeja_capturas"] = []
                     st.session_state["uploader_key"] += 1
-                    st.success(f"Plancha '{titulo_final}' guardada y lista en '2. Defectos'.")
                     st.rerun()
 
             with col_g2:
@@ -1414,6 +1413,7 @@ if opcion_menu == "Captura del Cuero":
 
     if st.session_state.get("plancha_activa_bytes"):
         nom_act = st.session_state.get("plancha_activa_nombre", "Plancha activa")
+        mostrar_aviso(f"Plancha guardada y lista en '2. Defectos': {nom_act}", "success")
         st.image(st.session_state["plancha_activa_bytes"], caption=f"Plancha activa: {nom_act}", use_container_width=True)
         if st.button("Borrar plancha activa para subir otra", use_container_width=True):
             limpiar_plancha_activa()
@@ -1428,7 +1428,7 @@ if opcion_menu == "Captura del Cuero":
     conn.close()
 
     if not posts:
-        st.info("No hay capturas aún.")
+        mostrar_aviso("No hay capturas aún. Sube tus fotos arriba para guardar la primera plancha.", "info")
     else:
         cols_hist = st.columns(3)
         for idx, p in enumerate(posts):
@@ -1450,7 +1450,6 @@ if opcion_menu == "Captura del Cuero":
                             b_pl, m_pl = ensamblar_plancha_completa(imgs_sel)
                             if b_pl:
                                 establecer_plancha_activa(b_pl, tit, post_id=post_id, info_extra=m_pl)
-                            st.success(f"'{tit}' seleccionada. Pasa a '2. Defectos'.")
                             st.rerun()
                 with c2:
                     if st.button("Eliminar", key=f"del_{post_id}", use_container_width=True):
@@ -1480,13 +1479,13 @@ elif opcion_menu == "Detección de Defectos":
         plancha_nombre = st.session_state.get("plancha_activa_nombre", "Plancha Guardada")
 
         if plancha_bytes:
-            st.success(f"Plancha lista: **{plancha_nombre}**")
+            mostrar_aviso(f"Plancha lista: {plancha_nombre}", "success")
             st.image(plancha_bytes, caption=plancha_nombre, use_container_width=True)
             if st.button("Borrar / Cambiar esta plancha", use_container_width=True):
                 limpiar_plancha_activa()
                 st.rerun()
         else:
-            st.info("No hay ninguna plancha guardada activa. Sube una abajo o en '1. Fotos'.")
+            mostrar_aviso("No hay ninguna plancha guardada activa. Sube una abajo o en '1. Fotos'.", "info")
 
         archivos_subidos = st.file_uploader(
             "O sube otra plancha / fotos aquí",
@@ -1535,9 +1534,9 @@ elif opcion_menu == "Detección de Defectos":
         res_plancha = st.session_state.get("resultado_plancha_defectos")
         if res_plancha:
             if res_plancha["error"]:
-                st.error(res_plancha["error"])
+                mostrar_aviso(res_plancha["error"], "error")
             else:
-                st.success(f"**{len(res_plancha['reporte'])} defectos encontrados.** Ya puedes ir a '3. Moldes'.")
+                mostrar_aviso(f"{len(res_plancha['reporte'])} defectos encontrados. Ya puedes ir a '3. Moldes'.", "success")
                 st.image(res_plancha["img_viz"], use_container_width=True)
                 if res_plancha["reporte"]:
                     st.dataframe(
@@ -1550,7 +1549,7 @@ elif opcion_menu == "Detección de Defectos":
                         hide_index=True
                     )
         else:
-            st.info("Presiona 'Buscar Defectos en el Cuero' para analizar la plancha guardada.")
+            mostrar_aviso("Presiona 'Buscar Defectos en el Cuero' para analizar la plancha guardada.", "info")
 
 # ================================================================== PASO 3: ACOMODO DE MOLDES Y PLAN DE CORTE IMPRIMIBLE
 elif opcion_menu == "Acomodo de Moldes":
@@ -1565,7 +1564,7 @@ elif opcion_menu == "Acomodo de Moldes":
         plancha_nombre = st.session_state.get("plancha_activa_nombre", "Plancha Guardada")
 
         if plancha_bytes:
-            st.success(f"Plancha activa: **{plancha_nombre}**")
+            mostrar_aviso(f"Plancha activa: {plancha_nombre}", "success")
             st.image(plancha_bytes, caption=plancha_nombre, use_container_width=True)
             if st.button("Borrar / Cambiar plancha", use_container_width=True):
                 limpiar_plancha_activa()
@@ -1678,10 +1677,10 @@ elif opcion_menu == "Acomodo de Moldes":
     rn = st.session_state.get("resultado_nesting_plancha")
     if rn:
         if rn["error"]:
-            st.error(rn["error"])
+            mostrar_aviso(rn["error"], "error")
         else:
             info = rn["info"]
-            st.success(f"**¡Listo! {info['piezas']} moldes, ninguno sobre un defecto** ({info['aprovechamiento_pct']}% de aprovechamiento).")
+            mostrar_aviso(f"¡Listo! {info['piezas']} moldes, ninguno sobre un defecto ({info['aprovechamiento_pct']}% de aprovechamiento).", "success")
 
             m_res = st.columns(3)
             m_res[0].metric("Plancha", 1)
@@ -1779,12 +1778,11 @@ elif opcion_menu == "Catálogo de Moldes":
                     )
                     conn.commit()
                     conn.close()
-                    st.success(f"Molde '{nombre_final}' guardado.")
                     st.rerun()
             else:
                 pts_vec, dim_str, err_vec = vectorizar_foto_molde_a_dxf(bytes_arch, ancho_real_mm=ancho_real_mm)
                 if err_vec:
-                    st.error(err_vec)
+                    mostrar_aviso(err_vec, "error")
                 else:
                     col_v1, col_v2 = st.columns(2)
                     with col_v1:
@@ -1817,7 +1815,6 @@ elif opcion_menu == "Catálogo de Moldes":
                             )
                             conn.commit()
                             conn.close()
-                            st.success(f"Molde '{nombre_final}' guardado.")
                             st.rerun()
                     with c_btn2:
                         st.download_button(
@@ -1848,7 +1845,7 @@ elif opcion_menu == "Catálogo de Moldes":
     ]
 
     if not m_filtrados:
-        st.info(f"No hay moldes en '{cat_vista}'.")
+        mostrar_aviso(f"No hay moldes en '{cat_vista}'.", "info")
     else:
         cols = st.columns(2)
         for idx, m in enumerate(m_filtrados):
